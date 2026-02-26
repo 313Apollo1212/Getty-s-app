@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/task_models.dart';
 import '../../services/supabase_service.dart';
+import '../../ui/app_theme.dart';
 import '../../utils/time_format.dart';
 import 'task_editor_screen.dart';
 
@@ -99,82 +100,60 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
     }
   }
 
-  Widget _buildAnswerBlock(
+  Widget _buildCompactAnswer(
     AssignmentQuestion question,
     QuestionAnswer? answer,
   ) {
     if (answer == null || answer.answerText.trim().isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.orange.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.orange.shade200),
+      return Text(
+        'No response',
+        style: TextStyle(
+          color: Theme.of(
+            context,
+          ).textTheme.bodySmall?.color?.withValues(alpha: 0.8),
         ),
-        child: const Text('No answer submitted yet'),
       );
     }
 
     final text = answer.answerText.trim();
-    final lower = text.toLowerCase();
-    final isCheck = question.inputType == QuestionInputType.check;
-    final isButtons = question.inputType == QuestionInputType.buttons;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blueGrey.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blueGrey.shade100),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    if (question.inputType == QuestionInputType.check) {
+      final isYes = text.toLowerCase() == 'yes';
+      return Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (isCheck)
-            Row(
-              children: [
-                Icon(
-                  lower == 'yes' ? Icons.check_circle : Icons.cancel,
-                  color: lower == 'yes' ? Colors.green : Colors.red,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  text,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            )
-          else if (isButtons)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                const Icon(Icons.smart_button_outlined),
-                Chip(
-                  label: Text(
-                    text,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            )
-          else
-            SelectableText(
-              text,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.schedule, size: 16),
-              const SizedBox(width: 6),
-              Text('Answered at ${formatDateTime(answer.answeredAt)}'),
-            ],
+          Icon(
+            isYes ? Icons.check_circle : Icons.cancel,
+            size: 18,
+            color: isYes ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 6),
+          Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      );
+    }
+
+    return Text(
+      text,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontWeight: FontWeight.w600),
+    );
+  }
+
+  Future<void> _showAnswerInfo(QuestionAnswer? answer) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Response Info'),
+        content: Text(
+          answer == null
+              ? 'No response has been submitted yet.'
+              : 'Answered: ${formatDateTime(answer.answeredAt)}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -194,119 +173,166 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.assignment.title,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            Chip(
-                              avatar: const Icon(Icons.person_outline),
-                              label: Text(widget.assignment.employeeName),
-                            ),
-                            Chip(
-                              avatar: const Icon(Icons.flag_outlined),
-                              label: Text(widget.assignment.status.label),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Expected: ${formatDateTime(widget.assignment.expectedAt)}',
-                        ),
-                        Text(
-                          widget.assignment.submittedAt == null
-                              ? 'Submitted: Not yet'
-                              : 'Submitted: ${formatDateTime(widget.assignment.submittedAt!)}',
-                        ),
-                        if (widget.assignment.instructions.isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Instructions',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(widget.assignment.instructions),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text('Answers', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                for (var index = 0; index < _questions.length; index++)
+      body: AppBackground(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: appPagePadding,
+                children: [
                   Card(
-                    margin: const EdgeInsets.only(bottom: 10),
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Question ${index + 1}',
-                            style: Theme.of(context).textTheme.bodySmall,
+                            widget.assignment.title,
+                            style: Theme.of(context).textTheme.headlineSmall,
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              Chip(
+                                avatar: const Icon(Icons.person_outline),
+                                label: Text(widget.assignment.employeeName),
+                              ),
+                              Chip(
+                                avatar: const Icon(Icons.flag_outlined),
+                                label: Text(widget.assignment.status.label),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
                           Text(
-                            _questions[index].prompt,
-                            style: Theme.of(context).textTheme.titleSmall,
+                            'Expected: ${formatDateTime(widget.assignment.expectedAt)}',
                           ),
-                          const SizedBox(height: 6),
-                          Chip(
-                            visualDensity: VisualDensity.compact,
-                            label: Text(_questions[index].inputType.label),
+                          Text(
+                            widget.assignment.submittedAt == null
+                                ? 'Submitted: Not yet'
+                                : 'Submitted: ${formatDateTime(widget.assignment.submittedAt!)}',
                           ),
-                          const SizedBox(height: 8),
-                          _buildAnswerBlock(
-                            _questions[index],
-                            _answers[_questions[index].id],
-                          ),
+                          if (widget.assignment.instructions.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Instructions',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(widget.assignment.instructions),
+                          ],
                         ],
                       ),
                     ),
                   ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.tonal(
-                      onPressed: _isSaving
-                          ? null
-                          : () => _changeStatus(TaskStatus.revisionRequested),
-                      child: const Text('Request Changes'),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Answers',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: Column(
+                        children: [
+                          for (
+                            var index = 0;
+                            index < _questions.length;
+                            index++
+                          ) ...[
+                            Builder(
+                              builder: (context) {
+                                final question = _questions[index];
+                                final answer = _answers[question.id];
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                    horizontal: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: index.isEven
+                                        ? const Color(0xFFF8FBFF)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      Expanded(
+                                        flex: 5,
+                                        child: Text(
+                                          question.prompt,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        flex: 4,
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: _buildCompactAnswer(
+                                            question,
+                                            answer,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 2),
+                                      IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        tooltip: 'Response Info',
+                                        onPressed: () =>
+                                            _showAnswerInfo(answer),
+                                        icon: const Icon(
+                                          Icons.info_outline,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                    FilledButton(
-                      onPressed: _isSaving
-                          ? null
-                          : () => _changeStatus(TaskStatus.approved),
-                      child: const Text('Approve'),
-                    ),
-                    OutlinedButton(
-                      onPressed: _isSaving
-                          ? null
-                          : () => _changeStatus(TaskStatus.pending),
-                      child: const Text('Reopen as Pending'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: _isSaving
+                            ? null
+                            : () => _changeStatus(TaskStatus.revisionRequested),
+                        child: const Text('Request Changes'),
+                      ),
+                      FilledButton(
+                        onPressed: _isSaving
+                            ? null
+                            : () => _changeStatus(TaskStatus.approved),
+                        child: const Text('Approve'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _isSaving
+                            ? null
+                            : () => _changeStatus(TaskStatus.pending),
+                        child: const Text('Reopen as Pending'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }

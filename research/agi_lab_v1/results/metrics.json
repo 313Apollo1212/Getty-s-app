@@ -1,0 +1,9 @@
+{
+  "a_before_accuracy": 0.104583,
+  "b_before_accuracy": 0.108750,
+  "symbol_swap_before": 0.065000,
+  "a_after_accuracy": 0.102917,
+  "b_after_accuracy": 0.094167,
+  "symbol_swap_after": 0.125000,
+  "retention_ratio": 0.984064
+}

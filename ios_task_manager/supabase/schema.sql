@@ -18,6 +18,7 @@ create table if not exists public.task_assignments (
   created_by uuid not null references public.profiles(id) on delete restrict,
   title text not null,
   instructions text not null default '',
+  show_at timestamptz not null,
   expected_at timestamptz not null,
   status task_status not null default 'pending',
   submitted_at timestamptz,
@@ -84,6 +85,16 @@ alter table public.profiles enable row level security;
 alter table public.task_assignments enable row level security;
 alter table public.assignment_questions enable row level security;
 alter table public.question_answers enable row level security;
+
+alter table public.task_assignments
+add column if not exists show_at timestamptz;
+
+update public.task_assignments
+set show_at = expected_at
+where show_at is null;
+
+alter table public.task_assignments
+alter column show_at set not null;
 
 -- Profiles
 create policy if not exists profiles_select_authenticated

@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/profile.dart';
 import '../models/task_models.dart';
 
+const _unwantedAnswerPrefix = '__meta:unwanted:';
+
 class AppException implements Exception {
   const AppException(this.message);
 
@@ -336,6 +338,7 @@ class SupabaseService {
       'employee_id': draft.employeeId,
       'title': draft.title.trim(),
       'instructions': draft.instructions.trim(),
+      'show_at': draft.showAt.toUtc().toIso8601String(),
       'expected_at': draft.expectedAt.toUtc().toIso8601String(),
     };
 
@@ -369,15 +372,25 @@ class SupabaseService {
       for (var index = 0; index < draft.questions.length; index++) {
         final question = draft.questions[index];
         final inputType = question.inputType.storageValue;
-        final dropdownOptions = switch (question.inputType) {
-          QuestionInputType.check => <String>['__type:check', 'Yes', 'No'],
-          QuestionInputType.buttons => <String>[
-            '__type:buttons',
-            ...question.dropdownOptions,
-          ],
-          QuestionInputType.dropdown => question.dropdownOptions,
-          _ => <String>[],
-        };
+        final dropdownOptions = <String>[];
+        if (question.inputType == QuestionInputType.check) {
+          dropdownOptions.add('__type:check');
+        }
+        if (question.inputType == QuestionInputType.buttons) {
+          dropdownOptions.add('__type:buttons');
+        }
+        if (question.unwantedAnswer != null &&
+            question.unwantedAnswer!.trim().isNotEmpty) {
+          dropdownOptions.add(
+            '$_unwantedAnswerPrefix${Uri.encodeComponent(question.unwantedAnswer!.trim())}',
+          );
+        }
+        if (question.inputType == QuestionInputType.check) {
+          dropdownOptions.addAll(const ['Yes', 'No']);
+        } else if (question.inputType == QuestionInputType.dropdown ||
+            question.inputType == QuestionInputType.buttons) {
+          dropdownOptions.addAll(question.dropdownOptions);
+        }
 
         questionsPayload.add({
           'assignment_id': id,
@@ -392,6 +405,11 @@ class SupabaseService {
         await _client.from('assignment_questions').insert(questionsPayload);
       }
     } on PostgrestException catch (error) {
+      if (_isShowAtColumnMissing(error.message)) {
+        throw const AppException(
+          'Database update required: add "show_at" column to task_assignments before saving tasks.',
+        );
+      }
       throw AppException(error.message);
     }
   }
@@ -399,13 +417,14 @@ class SupabaseService {
   Future<void> submitAnswers({
     required String assignmentId,
     required Map<String, String> answers,
+    Map<String, DateTime>? answeredAtByQuestion,
   }) async {
     final user = currentUser;
     if (user == null) {
       throw const AppException('You must be signed in.');
     }
 
-    final now = DateTime.now().toUtc().toIso8601String();
+    final taskSubmittedAt = DateTime.now().toUtc().toIso8601String();
 
     final payload = answers.entries
         .map(
@@ -414,7 +433,9 @@ class SupabaseService {
             'question_id': entry.key,
             'employee_id': user.id,
             'answer_text': entry.value.trim(),
-            'answered_at': now,
+            'answered_at':
+                answeredAtByQuestion?[entry.key]?.toUtc().toIso8601String() ??
+                DateTime.now().toUtc().toIso8601String(),
           },
         )
         .toList();
@@ -431,7 +452,10 @@ class SupabaseService {
 
       await _client
           .from('task_assignments')
-          .update({'status': TaskStatus.submitted.value, 'submitted_at': now})
+          .update({
+            'status': TaskStatus.submitted.value,
+            'submitted_at': taskSubmittedAt,
+          })
           .eq('id', assignmentId);
     } on PostgrestException catch (error) {
       throw AppException(error.message);
@@ -463,5 +487,96 @@ class SupabaseService {
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
+  }
+
+  Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts() async {
+    try {
+      final assignmentRows = await _client
+          .from('task_assignments')
+          .select(
+            '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
+          )
+          .order('submitted_at', ascending: false);
+
+      final questionRows = await _client.from('assignment_questions').select();
+      final answerRows = await _client
+          .from('question_answers')
+          .select()
+          .order('answered_at', ascending: false);
+
+      final assignmentsById = <String, TaskAssignment>{};
+      for (final row in (assignmentRows as List).cast<Map<String, dynamic>>()) {
+        final assignment = TaskAssignment.fromMap(row);
+        assignmentsById[assignment.id] = assignment;
+      }
+
+      final questionsById = <String, AssignmentQuestion>{};
+      for (final row in (questionRows as List).cast<Map<String, dynamic>>()) {
+        final question = AssignmentQuestion.fromMap(row);
+        questionsById[question.id] = question;
+      }
+
+      final alerts = <FlaggedTaskAlert>[];
+      for (final row in (answerRows as List).cast<Map<String, dynamic>>()) {
+        final questionId = row['question_id'] as String?;
+        if (questionId == null) {
+          continue;
+        }
+        final question = questionsById[questionId];
+        if (question == null) {
+          continue;
+        }
+
+        final unwantedAnswer = question.unwantedAnswer?.trim();
+        if (unwantedAnswer == null || unwantedAnswer.isEmpty) {
+          continue;
+        }
+
+        final answer = QuestionAnswer.fromMap(row);
+        if (!_matchesUnwantedAnswer(answer.answerText, unwantedAnswer)) {
+          continue;
+        }
+
+        final assignmentId = row['assignment_id'] as String?;
+        if (assignmentId == null) {
+          continue;
+        }
+        final assignment = assignmentsById[assignmentId];
+        if (assignment == null) {
+          continue;
+        }
+
+        alerts.add(
+          FlaggedTaskAlert(
+            assignment: assignment,
+            question: question,
+            answerText: answer.answerText.trim(),
+            unwantedAnswer: unwantedAnswer,
+            answeredAt: answer.answeredAt,
+          ),
+        );
+      }
+
+      alerts.sort((a, b) => b.answeredAt.compareTo(a.answeredAt));
+      return alerts;
+    } on PostgrestException catch (error) {
+      throw AppException(error.message);
+    }
+  }
+
+  Future<int> fetchFlaggedTaskAlertCount() async {
+    final alerts = await fetchFlaggedTaskAlerts();
+    return alerts.length;
+  }
+
+  bool _matchesUnwantedAnswer(String answerText, String unwantedAnswer) {
+    return answerText.trim().toLowerCase() ==
+        unwantedAnswer.trim().toLowerCase();
+  }
+
+  bool _isShowAtColumnMissing(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('show_at') &&
+        (lower.contains('column') || lower.contains('schema cache'));
   }
 }

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/profile.dart';
 import '../../models/task_models.dart';
 import '../../services/supabase_service.dart';
-import '../../utils/time_format.dart';
+import '../../ui/app_theme.dart';
 import '../profile_screen.dart';
 import 'task_submission_screen.dart';
 
@@ -23,6 +23,19 @@ class EmployeeHomeScreen extends StatefulWidget {
 
 class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   late Future<List<TaskAssignment>> _tasksFuture;
+
+  bool _isActionable(TaskAssignment task) {
+    return task.status == TaskStatus.pending ||
+        task.status == TaskStatus.revisionRequested;
+  }
+
+  bool _isVisibleNow(TaskAssignment task) {
+    if (!_isActionable(task)) {
+      return false;
+    }
+    final nowUtc = DateTime.now().toUtc();
+    return !task.showAt.toUtc().isAfter(nowUtc);
+  }
 
   @override
   void initState() {
@@ -54,9 +67,12 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   Future<void> _openProfile() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ProfileScreen(
-          service: widget.service,
-          currentUser: widget.currentUser,
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Profile')),
+          body: ProfileScreen(
+            service: widget.service,
+            currentUser: widget.currentUser,
+          ),
         ),
       ),
     );
@@ -66,79 +82,101 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('My Tasks - ${widget.currentUser.fullName}'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('My Tasks'),
+            Text(
+              widget.currentUser.fullName,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: _openProfile,
             tooltip: 'Profile',
-            icon: const Icon(Icons.person),
+            icon: const Icon(Icons.person_outline),
           ),
-          TextButton.icon(
+          IconButton(
             onPressed: widget.service.signOut,
-            icon: const Icon(Icons.logout),
-            label: const Text('Sign Out'),
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Sign Out',
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _reload,
-        child: FutureBuilder<List<TaskAssignment>>(
-          future: _tasksFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return ListView(
-                children: [
-                  const SizedBox(height: 120),
-                  Center(child: Text(snapshot.error.toString())),
-                ],
-              );
-            }
-
-            final tasks = snapshot.data ?? const [];
-            if (tasks.isEmpty) {
-              return ListView(
-                children: const [
-                  SizedBox(height: 120),
-                  Center(child: Text('No tasks assigned yet.')),
-                ],
-              );
-            }
-
-            return ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: tasks.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final task = tasks[index];
-
-                return Card(
-                  child: ListTile(
-                    title: Text(task.title),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Expected: ${formatDateTime(task.expectedAt)}'),
-                        Text(
-                          task.submittedAt == null
-                              ? 'Submitted: Not yet'
-                              : 'Submitted: ${formatDateTime(task.submittedAt!)}',
-                        ),
-                      ],
-                    ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [Chip(label: Text(task.status.label))],
-                    ),
-                    onTap: () => _openTask(task),
-                  ),
+      body: AppBackground(
+        child: RefreshIndicator(
+          onRefresh: _reload,
+          child: FutureBuilder<List<TaskAssignment>>(
+            future: _tasksFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return ListView(
+                  children: const [
+                    SizedBox(height: 160),
+                    Center(child: CircularProgressIndicator()),
+                  ],
                 );
-              },
-            );
-          },
+              }
+
+              if (snapshot.hasError) {
+                return ListView(
+                  padding: appPagePadding,
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(snapshot.error.toString()),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              final allTasks = snapshot.data ?? const [];
+              final tasks = allTasks.where(_isVisibleNow).toList();
+              if (tasks.isEmpty) {
+                return ListView(
+                  padding: appPagePadding,
+                  children: const [
+                    Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No tasks due right now.'),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              return ListView.separated(
+                padding: appPagePadding,
+                itemCount: tasks.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final task = tasks[index];
+                  return Card(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: () => _openTask(task),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                        ),
+                        title: Text(
+                          task.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );

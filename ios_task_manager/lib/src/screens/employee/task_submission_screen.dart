@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/task_models.dart';
 import '../../services/supabase_service.dart';
+import '../../ui/app_theme.dart';
 import '../../utils/time_format.dart';
 
 class TaskSubmissionScreen extends StatefulWidget {
@@ -26,6 +27,7 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
   List<AssignmentQuestion> _questions = const [];
   Map<String, QuestionAnswer> _answers = const {};
   final Map<String, TextEditingController> _controllers = {};
+  final Map<String, DateTime> _answerEditedAt = {};
 
   bool get _canEdit {
     return widget.assignment.status == TaskStatus.pending ||
@@ -61,12 +63,14 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
       }
 
       for (final question in questions) {
+        final existingAnswer = answers[question.id];
         _controllers.putIfAbsent(
           question.id,
-          () => TextEditingController(
-            text: answers[question.id]?.answerText ?? '',
-          ),
+          () => TextEditingController(text: existingAnswer?.answerText ?? ''),
         );
+        if (existingAnswer != null) {
+          _answerEditedAt[question.id] = existingAnswer.answeredAt;
+        }
       }
 
       setState(() {
@@ -106,7 +110,12 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
     final hour = picked.hour.toString().padLeft(2, '0');
     final minute = picked.minute.toString().padLeft(2, '0');
     _controllers[question.id]?.text = '$hour:$minute';
+    _answerEditedAt[question.id] = DateTime.now().toUtc();
     setState(() {});
+  }
+
+  void _markAnswerEdited(String questionId) {
+    _answerEditedAt[questionId] = DateTime.now().toUtc();
   }
 
   Future<void> _submit() async {
@@ -128,6 +137,7 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
       await widget.service.submitAnswers(
         assignmentId: widget.assignment.id,
         answers: payload,
+        answeredAtByQuestion: _answerEditedAt,
       );
 
       if (!mounted) {
@@ -153,65 +163,80 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Task Details')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Text(
-                    widget.assignment.title,
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Expected: ${formatDateTime(widget.assignment.expectedAt)}',
-                  ),
-                  Text(
-                    widget.assignment.submittedAt == null
-                        ? 'Submitted: Not yet'
-                        : 'Submitted: ${formatDateTime(widget.assignment.submittedAt!)}',
-                  ),
-                  const SizedBox(height: 8),
-                  Chip(
-                    label: Text('Status: ${widget.assignment.status.label}'),
-                  ),
-                  if (!_canEdit) ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      'This task is read-only until admin requests changes.',
+      body: AppBackground(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
+                key: _formKey,
+                child: ListView(
+                  padding: appPagePadding,
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.assignment.title,
+                              style: Theme.of(context).textTheme.headlineSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Expected: ${formatDateTime(widget.assignment.expectedAt)}',
+                            ),
+                            Text(
+                              widget.assignment.submittedAt == null
+                                  ? 'Submitted: Not yet'
+                                  : 'Submitted: ${formatDateTime(widget.assignment.submittedAt!)}',
+                            ),
+                            const SizedBox(height: 8),
+                            Chip(
+                              label: Text(
+                                'Status: ${widget.assignment.status.label}',
+                              ),
+                            ),
+                            if (!_canEdit) ...[
+                              const SizedBox(height: 8),
+                              const Text(
+                                'This task is read-only until admin requests changes.',
+                              ),
+                            ],
+                            if (widget.assignment.instructions.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Text(widget.assignment.instructions),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    for (final question in _questions)
+                      _QuestionInputCard(
+                        question: question,
+                        controller: _controllers[question.id]!,
+                        initialAnswer: _answers[question.id],
+                        canEdit: _canEdit,
+                        onPickTime: () => _pickTime(question),
+                        onAnswerChanged: () => _markAnswerEdited(question.id),
+                      ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _isSaving || !_canEdit ? null : _submit,
+                      icon: const Icon(Icons.send),
+                      label: Text(
+                        _isSaving
+                            ? 'Submitting...'
+                            : widget.assignment.status ==
+                                  TaskStatus.revisionRequested
+                            ? 'Resubmit'
+                            : 'Submit',
+                      ),
                     ),
                   ],
-                  if (widget.assignment.instructions.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(widget.assignment.instructions),
-                  ],
-                  const SizedBox(height: 16),
-                  for (final question in _questions)
-                    _QuestionInputCard(
-                      question: question,
-                      controller: _controllers[question.id]!,
-                      initialAnswer: _answers[question.id],
-                      canEdit: _canEdit,
-                      onPickTime: () => _pickTime(question),
-                    ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _isSaving || !_canEdit ? null : _submit,
-                    icon: const Icon(Icons.send),
-                    label: Text(
-                      _isSaving
-                          ? 'Submitting...'
-                          : widget.assignment.status ==
-                                TaskStatus.revisionRequested
-                          ? 'Resubmit'
-                          : 'Submit',
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+      ),
     );
   }
 }
@@ -223,6 +248,7 @@ class _QuestionInputCard extends StatefulWidget {
     required this.initialAnswer,
     required this.canEdit,
     required this.onPickTime,
+    required this.onAnswerChanged,
   });
 
   final AssignmentQuestion question;
@@ -230,6 +256,7 @@ class _QuestionInputCard extends StatefulWidget {
   final QuestionAnswer? initialAnswer;
   final bool canEdit;
   final VoidCallback onPickTime;
+  final VoidCallback onAnswerChanged;
 
   @override
   State<_QuestionInputCard> createState() => _QuestionInputCardState();
@@ -280,14 +307,15 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
               widget.question.prompt,
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 4),
-            Text('Type: ${widget.question.inputType.label}'),
             const SizedBox(height: 8),
             switch (widget.question.inputType) {
               QuestionInputType.text => TextFormField(
                 controller: widget.controller,
                 readOnly: !widget.canEdit,
-                decoration: const InputDecoration(border: OutlineInputBorder()),
+                decoration: const InputDecoration(),
+                onChanged: widget.canEdit
+                    ? (_) => widget.onAnswerChanged()
+                    : null,
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'This answer is required.';
@@ -301,7 +329,10 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: const InputDecoration(border: OutlineInputBorder()),
+                decoration: const InputDecoration(),
+                onChanged: widget.canEdit
+                    ? (_) => widget.onAnswerChanged()
+                    : null,
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'This answer is required.';
@@ -317,7 +348,6 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                 readOnly: true,
                 onTap: widget.canEdit ? widget.onPickTime : null,
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
                   hintText: 'HH:MM',
                   suffixIcon: Icon(Icons.access_time),
                 ),
@@ -357,8 +387,9 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                         }
                         setState(() => _dropdownValue = value);
                         widget.controller.text = value;
+                        widget.onAnswerChanged();
                       },
-                decoration: const InputDecoration(border: OutlineInputBorder()),
+                decoration: const InputDecoration(),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Please select an option.';
@@ -390,6 +421,7 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                                     setState(() => _checkValue = true);
                                     widget.controller.text = 'Yes';
                                     state.didChange(true);
+                                    widget.onAnswerChanged();
                                   }
                                 : null,
                           ),
@@ -401,6 +433,7 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                                     setState(() => _checkValue = false);
                                     widget.controller.text = 'No';
                                     state.didChange(false);
+                                    widget.onAnswerChanged();
                                   }
                                 : null,
                           ),
@@ -435,9 +468,8 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                         Text(
                           'Need to be entered',
                           style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).textTheme.bodySmall?.color?.withValues(alpha: 0.8),
+                            color: Theme.of(context).textTheme.bodySmall?.color
+                                ?.withValues(alpha: 0.8),
                           ),
                         ),
                       if (_buttonsValue == null) const SizedBox(height: 6),
@@ -454,6 +486,7 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                                       setState(() => _buttonsValue = option);
                                       widget.controller.text = option;
                                       state.didChange(option);
+                                      widget.onAnswerChanged();
                                     }
                                   : null,
                             ),

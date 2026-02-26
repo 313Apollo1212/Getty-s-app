@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/profile.dart';
 import '../services/supabase_service.dart';
+import '../ui/app_theme.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -90,90 +91,103 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Form(
       key: _formKey,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('Profile', style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _fullNameController,
-            decoration: const InputDecoration(
-              labelText: 'Full Name',
-              border: OutlineInputBorder(),
+      child: AppBackground(
+        child: ListView(
+          padding: appPagePadding,
+          children: [
+            Text('Profile', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 10),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _fullNameController,
+                      decoration: const InputDecoration(labelText: 'Full Name'),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Full name is required.';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: const InputDecoration(labelText: 'Username'),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Username is required.';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
             ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Full name is required.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _usernameController,
-            decoration: const InputDecoration(
-              labelText: 'Username',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Change Password',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _newPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'New Password',
+                        helperText: 'Leave blank to keep current password.',
+                      ),
+                      validator: (value) {
+                        final text = value?.trim() ?? '';
+                        if (text.isEmpty) {
+                          return null;
+                        }
+                        if (text.length < 4) {
+                          return 'Password must be at least 4 characters.';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _confirmPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Confirm New Password',
+                      ),
+                      validator: (value) {
+                        final newPassword = _newPasswordController.text.trim();
+                        final confirm = value?.trim() ?? '';
+                        if (newPassword.isEmpty && confirm.isEmpty) {
+                          return null;
+                        }
+                        if (newPassword != confirm) {
+                          return 'Passwords do not match.';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
             ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Username is required.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Change Password',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          TextFormField(
-            controller: _newPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'New Password',
-              border: OutlineInputBorder(),
-              helperText: 'Leave blank to keep current password.',
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _isSaving ? null : _save,
+              icon: const Icon(Icons.save),
+              label: Text(_isSaving ? 'Saving...' : 'Save Profile'),
             ),
-            validator: (value) {
-              final text = value?.trim() ?? '';
-              if (text.isEmpty) {
-                return null;
-              }
-              if (text.length < 4) {
-                return 'Password must be at least 4 characters.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _confirmPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Confirm New Password',
-              border: OutlineInputBorder(),
-            ),
-            validator: (value) {
-              final newPassword = _newPasswordController.text.trim();
-              final confirm = value?.trim() ?? '';
-              if (newPassword.isEmpty && confirm.isEmpty) {
-                return null;
-              }
-              if (newPassword != confirm) {
-                return 'Passwords do not match.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _isSaving ? null : _save,
-            icon: const Icon(Icons.save),
-            label: Text(_isSaving ? 'Saving...' : 'Save Profile'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

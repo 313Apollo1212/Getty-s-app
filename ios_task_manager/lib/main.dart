@@ -6,6 +6,7 @@ import 'src/screens/admin/admin_shell.dart';
 import 'src/screens/employee/employee_home_screen.dart';
 import 'src/screens/login_screen.dart';
 import 'src/services/supabase_service.dart';
+import 'src/ui/app_theme.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabaseAnonKey = String.fromEnvironment(
@@ -31,10 +32,7 @@ class TaskManagerApp extends StatelessWidget {
     return MaterialApp(
       title: 'Task Manager',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A5D80)),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: _supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty
           ? const MissingSetupScreen()
           : const AuthGate(),

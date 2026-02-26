@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/app_role.dart';
 import '../../models/profile.dart';
 import '../../services/supabase_service.dart';
+import '../../ui/app_theme.dart';
 
 class EmployeesScreen extends StatefulWidget {
   const EmployeesScreen({super.key, required this.service});
@@ -98,90 +99,220 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     }
   }
 
+  Future<void> _onUserMenuSelected(
+    _UserMenuAction action,
+    Profile profile,
+    bool isCurrentUser,
+  ) async {
+    switch (action) {
+      case _UserMenuAction.resetPassword:
+        await _openResetPasswordDialog(profile);
+      case _UserMenuAction.delete:
+        if (isCurrentUser) {
+          return;
+        }
+        await _deleteUser(profile);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: _reload,
-      child: FutureBuilder<List<Profile>>(
-        future: _usersFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    return AppBackground(
+      child: RefreshIndicator(
+        onRefresh: _reload,
+        child: FutureBuilder<List<Profile>>(
+          future: _usersFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return ListView(
+                children: const [
+                  SizedBox(height: 160),
+                  Center(child: CircularProgressIndicator()),
+                ],
+              );
+            }
 
-          if (snapshot.hasError) {
-            return ListView(
-              children: [
-                const SizedBox(height: 120),
-                Center(child: Text(snapshot.error.toString())),
-              ],
-            );
-          }
-
-          final users = snapshot.data ?? const [];
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: users.length + 1,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    onPressed: _openCreateUserDialog,
-                    icon: const Icon(Icons.person_add_alt_1),
-                    label: const Text('Add User'),
-                  ),
-                );
-              }
-
-              final profile = users[index - 1];
-              final isAdmin = profile.role == AppRole.admin;
-              final isCurrentUser =
-                  widget.service.currentUser?.id == profile.id;
-
-              return Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    child: Text(
-                      profile.fullName.isEmpty ? '?' : profile.fullName[0],
+            if (snapshot.hasError) {
+              return ListView(
+                padding: appPagePadding,
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(snapshot.error.toString()),
                     ),
                   ),
-                  title: Text(profile.fullName),
-                  subtitle: Text('@${profile.username}'),
-                  trailing: Wrap(
-                    spacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Chip(
-                        label: Text(isAdmin ? 'Admin' : 'Employee'),
-                        side: BorderSide.none,
-                        backgroundColor: isAdmin
-                            ? Colors.orange.shade100
-                            : Colors.blue.shade100,
-                      ),
-                      IconButton(
-                        onPressed: () => _openResetPasswordDialog(profile),
-                        tooltip: 'Reset Password',
-                        icon: const Icon(Icons.lock_reset),
-                      ),
-                      IconButton(
-                        onPressed: isCurrentUser
-                            ? null
-                            : () => _deleteUser(profile),
-                        tooltip: isCurrentUser
-                            ? 'Cannot delete yourself'
-                            : 'Delete User',
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               );
-            },
-          );
-        },
+            }
+
+            final users = snapshot.data ?? const [];
+            final viewerId = widget.service.currentUser?.id;
+            final visibleUsers = viewerId == null
+                ? users
+                : users.where((user) => user.id != viewerId).toList();
+            final adminCount = visibleUsers
+                .where((u) => u.role == AppRole.admin)
+                .length;
+            final employeeCount = visibleUsers.length - adminCount;
+
+            return ListView.separated(
+              padding: appPagePadding,
+              itemCount: visibleUsers.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                Chip(
+                                  avatar: const Icon(
+                                    Icons.groups_2_outlined,
+                                    size: 16,
+                                  ),
+                                  label: Text('Users ${visibleUsers.length}'),
+                                ),
+                                Chip(
+                                  avatar: const Icon(
+                                    Icons.admin_panel_settings_outlined,
+                                    size: 16,
+                                  ),
+                                  label: Text('Admins $adminCount'),
+                                ),
+                                Chip(
+                                  avatar: const Icon(
+                                    Icons.badge_outlined,
+                                    size: 16,
+                                  ),
+                                  label: Text('Employees $employeeCount'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          FilledButton.icon(
+                            onPressed: _openCreateUserDialog,
+                            icon: const Icon(Icons.person_add_alt_1),
+                            label: const Text('Add User'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                final profile = visibleUsers[index - 1];
+                final isAdmin = profile.role == AppRole.admin;
+                final isCurrentUser = viewerId == profile.id;
+
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                          child: Text(
+                            profile.fullName.isEmpty
+                                ? '?'
+                                : profile.fullName[0].toUpperCase(),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                profile.fullName,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 2),
+                              Text('@${profile.username}'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Chip(label: Text(isAdmin ? 'Admin' : 'Employee')),
+                        PopupMenuButton<_UserMenuAction>(
+                          tooltip: 'Actions',
+                          onSelected: (action) => _onUserMenuSelected(
+                            action,
+                            profile,
+                            isCurrentUser,
+                          ),
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: _UserMenuAction.resetPassword,
+                              child: _MenuItem(
+                                icon: Icons.lock_reset_rounded,
+                                label: 'Reset Password',
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _UserMenuAction.delete,
+                              enabled: !isCurrentUser,
+                              child: _MenuItem(
+                                icon: Icons.delete_outline_rounded,
+                                label: isCurrentUser
+                                    ? 'Cannot Delete Yourself'
+                                    : 'Delete User',
+                                color: isCurrentUser
+                                    ? null
+                                    : Colors.red.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
+    );
+  }
+}
+
+enum _UserMenuAction { resetPassword, delete }
+
+class _MenuItem extends StatelessWidget {
+  const _MenuItem({required this.icon, required this.label, this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label, style: TextStyle(color: color)),
+        ),
+      ],
     );
   }
 }

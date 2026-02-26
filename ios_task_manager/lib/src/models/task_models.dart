@@ -32,6 +32,9 @@ enum TaskStatus {
   }
 }
 
+const _typePrefix = '__type:';
+const _unwantedAnswerPrefix = '__meta:unwanted:';
+
 enum QuestionInputType {
   text,
   number,
@@ -82,6 +85,7 @@ class TaskAssignment {
     required this.employeeUsername,
     required this.title,
     required this.instructions,
+    required this.showAt,
     required this.expectedAt,
     required this.status,
     required this.createdAt,
@@ -94,6 +98,7 @@ class TaskAssignment {
   final String employeeUsername;
   final String title;
   final String instructions;
+  final DateTime showAt;
   final DateTime expectedAt;
   final TaskStatus status;
   final DateTime createdAt;
@@ -109,6 +114,9 @@ class TaskAssignment {
       employeeUsername: employee['username'] as String? ?? '',
       title: map['title'] as String? ?? '',
       instructions: map['instructions'] as String? ?? '',
+      showAt: DateTime.parse(
+        (map['show_at'] as String?) ?? (map['expected_at'] as String),
+      ),
       expectedAt: DateTime.parse(map['expected_at'] as String),
       status: TaskStatus.fromString(map['status'] as String? ?? 'pending'),
       createdAt: DateTime.parse(map['created_at'] as String),
@@ -127,6 +135,7 @@ class AssignmentQuestion {
     required this.inputType,
     required this.sortOrder,
     required this.dropdownOptions,
+    required this.unwantedAnswer,
   });
 
   final String id;
@@ -135,6 +144,7 @@ class AssignmentQuestion {
   final QuestionInputType inputType;
   final int sortOrder;
   final List<String> dropdownOptions;
+  final String? unwantedAnswer;
 
   factory AssignmentQuestion.fromMap(Map<String, dynamic> map) {
     final optionsRaw = map['dropdown_options'];
@@ -146,9 +156,26 @@ class AssignmentQuestion {
     }
 
     String? storedType;
-    if (options.isNotEmpty && options.first.startsWith('__type:')) {
-      storedType = options.first.replaceFirst('__type:', '').trim();
-      options.removeAt(0);
+    String? unwantedAnswer;
+    final cleanedOptions = <String>[];
+
+    for (final option in options) {
+      if (option.startsWith(_typePrefix)) {
+        storedType = option.replaceFirst(_typePrefix, '').trim();
+        continue;
+      }
+      if (option.startsWith(_unwantedAnswerPrefix)) {
+        final encoded = option.replaceFirst(_unwantedAnswerPrefix, '').trim();
+        if (encoded.isNotEmpty) {
+          try {
+            unwantedAnswer = Uri.decodeComponent(encoded);
+          } catch (_) {
+            unwantedAnswer = encoded;
+          }
+        }
+        continue;
+      }
+      cleanedOptions.add(option);
     }
 
     var inputType = QuestionInputType.fromString(
@@ -161,7 +188,9 @@ class AssignmentQuestion {
       inputType = QuestionInputType.fromString(storedType);
     }
 
-    final lowered = options.map((entry) => entry.trim().toLowerCase()).toList();
+    final lowered = cleanedOptions
+        .map((entry) => entry.trim().toLowerCase())
+        .toList();
     final isYesNo =
         lowered.length == 2 &&
         lowered.contains('yes') &&
@@ -176,7 +205,8 @@ class AssignmentQuestion {
       prompt: map['prompt'] as String? ?? '',
       inputType: inputType,
       sortOrder: (map['sort_order'] as num?)?.toInt() ?? 0,
-      dropdownOptions: options,
+      dropdownOptions: cleanedOptions,
+      unwantedAnswer: unwantedAnswer,
     );
   }
 }
@@ -206,11 +236,13 @@ class TaskDraftQuestion {
     required this.prompt,
     required this.inputType,
     required this.dropdownOptions,
+    this.unwantedAnswer,
   });
 
   final String prompt;
   final QuestionInputType inputType;
   final List<String> dropdownOptions;
+  final String? unwantedAnswer;
 }
 
 class TaskAssignmentDraft {
@@ -218,6 +250,7 @@ class TaskAssignmentDraft {
     required this.employeeId,
     required this.title,
     required this.instructions,
+    required this.showAt,
     required this.expectedAt,
     required this.questions,
   });
@@ -225,6 +258,23 @@ class TaskAssignmentDraft {
   final String employeeId;
   final String title;
   final String instructions;
+  final DateTime showAt;
   final DateTime expectedAt;
   final List<TaskDraftQuestion> questions;
+}
+
+class FlaggedTaskAlert {
+  const FlaggedTaskAlert({
+    required this.assignment,
+    required this.question,
+    required this.answerText,
+    required this.unwantedAnswer,
+    required this.answeredAt,
+  });
+
+  final TaskAssignment assignment;
+  final AssignmentQuestion question;
+  final String answerText;
+  final String unwantedAnswer;
+  final DateTime answeredAt;
 }

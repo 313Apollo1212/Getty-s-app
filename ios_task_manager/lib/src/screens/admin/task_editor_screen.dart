@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/profile.dart';
 import '../../models/task_models.dart';
 import '../../services/supabase_service.dart';
+import '../../ui/app_theme.dart';
 import '../../utils/time_format.dart';
 
 enum _ScheduleMode { oneTime, weekdays }
@@ -26,6 +27,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   final _titleController = TextEditingController();
   final _instructionsController = TextEditingController();
 
+  DateTime _showAt = DateTime.now();
   DateTime _expectedAt = DateTime.now().add(const Duration(hours: 1));
   String? _selectedEmployeeId;
   bool _isLoading = false;
@@ -36,7 +38,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   DateTime _repeatEndDate = DateUtils.dateOnly(
     DateTime.now().add(const Duration(days: 14)),
   );
-  TimeOfDay _repeatTime = TimeOfDay.now();
+  TimeOfDay _repeatShowTime = TimeOfDay.now();
+  TimeOfDay _repeatExpectedTime = TimeOfDay.now();
   final Set<int> _selectedWeekdays = {DateTime.now().weekday};
 
   late Future<List<Profile>> _employeesFuture;
@@ -53,13 +56,16 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     if (existing != null) {
       _titleController.text = existing.title;
       _instructionsController.text = existing.instructions;
+      _showAt = existing.showAt;
       _expectedAt = existing.expectedAt;
       _selectedEmployeeId = existing.employeeId;
-      _repeatTime = TimeOfDay.fromDateTime(existing.expectedAt);
+      _repeatShowTime = TimeOfDay.fromDateTime(existing.showAt);
+      _repeatExpectedTime = TimeOfDay.fromDateTime(existing.expectedAt);
       _loadExistingQuestions(existing.id);
     } else {
       _questions.add(_QuestionDraftForm());
-      _repeatTime = TimeOfDay.fromDateTime(_expectedAt);
+      _repeatShowTime = TimeOfDay.fromDateTime(_showAt);
+      _repeatExpectedTime = TimeOfDay.fromDateTime(_expectedAt);
     }
   }
 
@@ -84,6 +90,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
             prompt: row.prompt,
             type: row.inputType,
             options: row.dropdownOptions.join(', '),
+            unwantedAnswer: row.unwantedAnswer ?? '',
           ),
         );
       }
@@ -105,6 +112,39 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         setState(() => _isLoadingQuestions = false);
       }
     }
+  }
+
+  Future<void> _pickShowDateTime() async {
+    final now = DateTime.now();
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _showAt,
+      firstDate: now.subtract(const Duration(days: 30)),
+      lastDate: now.add(const Duration(days: 730)),
+    );
+
+    if (pickedDate == null || !mounted) {
+      return;
+    }
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_showAt),
+    );
+
+    if (pickedTime == null) {
+      return;
+    }
+
+    setState(() {
+      _showAt = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+    });
   }
 
   Future<void> _pickExpectedDateTime() async {
@@ -180,7 +220,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   Future<void> _pickRepeatTime() async {
     final pickedTime = await showTimePicker(
       context: context,
-      initialTime: _repeatTime,
+      initialTime: _repeatShowTime,
     );
 
     if (pickedTime == null) {
@@ -188,7 +228,22 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     }
 
     setState(() {
-      _repeatTime = pickedTime;
+      _repeatShowTime = pickedTime;
+    });
+  }
+
+  Future<void> _pickRepeatExpectedTime() async {
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: _repeatExpectedTime,
+    );
+
+    if (pickedTime == null) {
+      return;
+    }
+
+    setState(() {
+      _repeatExpectedTime = pickedTime;
     });
   }
 
@@ -208,30 +263,39 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     });
   }
 
-  List<DateTime> _buildRecurringExpectedDates() {
+  List<_ScheduledDatePair> _buildRecurringSchedule() {
     final start = DateUtils.dateOnly(_repeatStartDate);
     final end = DateUtils.dateOnly(_repeatEndDate);
 
-    final dates = <DateTime>[];
+    final schedule = <_ScheduledDatePair>[];
     for (
       DateTime date = start;
       !date.isAfter(end);
       date = date.add(const Duration(days: 1))
     ) {
       if (_selectedWeekdays.contains(date.weekday)) {
-        dates.add(
-          DateTime(
-            date.year,
-            date.month,
-            date.day,
-            _repeatTime.hour,
-            _repeatTime.minute,
+        schedule.add(
+          _ScheduledDatePair(
+            showAt: DateTime(
+              date.year,
+              date.month,
+              date.day,
+              _repeatShowTime.hour,
+              _repeatShowTime.minute,
+            ),
+            expectedAt: DateTime(
+              date.year,
+              date.month,
+              date.day,
+              _repeatExpectedTime.hour,
+              _repeatExpectedTime.minute,
+            ),
           ),
         );
       }
     }
 
-    return dates;
+    return schedule;
   }
 
   Future<void> _save() async {
@@ -280,11 +344,26 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         return;
       }
 
+      final unwantedAnswer = question.unwantedAnswerController.text.trim();
+      if (question.notifyOnUnwantedAnswer && unwantedAnswer.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Enter the unwanted answer or turn off notifications for that question.',
+            ),
+          ),
+        );
+        return;
+      }
+
       draftQuestions.add(
         TaskDraftQuestion(
           prompt: prompt,
           inputType: question.type,
           dropdownOptions: options,
+          unwantedAnswer: question.notifyOnUnwantedAnswer
+              ? unwantedAnswer
+              : null,
         ),
       );
     }
@@ -306,6 +385,30 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         );
         return;
       }
+
+      if (_repeatShowTime.hour > _repeatExpectedTime.hour ||
+          (_repeatShowTime.hour == _repeatExpectedTime.hour &&
+              _repeatShowTime.minute > _repeatExpectedTime.minute)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Show time must be before or equal to expected answer time.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    if (_showAt.isAfter(_expectedAt)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Show time must be before or equal to expected answer time.',
+          ),
+        ),
+      );
+      return;
     }
 
     setState(() => _isLoading = true);
@@ -318,6 +421,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
             employeeId: _selectedEmployeeId!,
             title: _titleController.text,
             instructions: _instructionsController.text,
+            showAt: _showAt,
             expectedAt: _expectedAt,
             questions: draftQuestions,
           ),
@@ -325,8 +429,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         );
         createdCount = 1;
       } else {
-        final expectedDates = _buildRecurringExpectedDates();
-        if (expectedDates.isEmpty) {
+        final schedule = _buildRecurringSchedule();
+        if (schedule.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
@@ -338,7 +442,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
           return;
         }
 
-        if (expectedDates.length > 500) {
+        if (schedule.length > 500) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
@@ -350,18 +454,22 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
           return;
         }
 
-        for (final expectedAt in expectedDates) {
+        for (final item in schedule) {
+          if (item.showAt.isAfter(item.expectedAt)) {
+            continue;
+          }
           await widget.service.saveAssignment(
             draft: TaskAssignmentDraft(
               employeeId: _selectedEmployeeId!,
               title: _titleController.text,
               instructions: _instructionsController.text,
-              expectedAt: expectedAt,
+              showAt: item.showAt,
+              expectedAt: item.expectedAt,
               questions: draftQuestions,
             ),
           );
         }
-        createdCount = expectedDates.length;
+        createdCount = schedule.length;
       }
 
       if (!mounted) {
@@ -411,223 +519,295 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final recurringCount = _buildRecurringExpectedDates().length;
+    final recurringCount = _buildRecurringSchedule().length;
 
     return Scaffold(
       appBar: AppBar(title: Text(_isEdit ? 'Edit Task' : 'Create Task')),
-      body: _isLoadingQuestions
-          ? const Center(child: CircularProgressIndicator())
-          : FutureBuilder<List<Profile>>(
-              future: _employeesFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+      body: AppBackground(
+        child: _isLoadingQuestions
+            ? const Center(child: CircularProgressIndicator())
+            : FutureBuilder<List<Profile>>(
+                future: _employeesFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                if (snapshot.hasError) {
-                  return Center(child: Text(snapshot.error.toString()));
-                }
+                  if (snapshot.hasError) {
+                    return Center(child: Text(snapshot.error.toString()));
+                  }
 
-                final employees = snapshot.data ?? const [];
+                  final employees = snapshot.data ?? const [];
 
-                return Form(
-                  key: _formKey,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedEmployeeId,
-                        decoration: const InputDecoration(
-                          labelText: 'Employee',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: employees
-                            .map(
-                              (employee) => DropdownMenuItem(
-                                value: employee.id,
-                                child: Text(
-                                  '${employee.fullName} (@${employee.username})',
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          setState(() => _selectedEmployeeId = value);
-                        },
-                        validator: (value) =>
-                            value == null ? 'Employee is required.' : null,
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _titleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Task Title',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Title is required.';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _instructionsController,
-                        minLines: 2,
-                        maxLines: 4,
-                        decoration: const InputDecoration(
-                          labelText: 'Instructions',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Schedule',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      if (!_isEdit)
-                        SegmentedButton<_ScheduleMode>(
-                          segments: const [
-                            ButtonSegment(
-                              value: _ScheduleMode.oneTime,
-                              icon: Icon(Icons.event),
-                              label: Text('One Time'),
-                            ),
-                            ButtonSegment(
-                              value: _ScheduleMode.weekdays,
-                              icon: Icon(Icons.calendar_view_week),
-                              label: Text('Weekdays'),
-                            ),
-                          ],
-                          selected: {_scheduleMode},
-                          onSelectionChanged: (selection) {
-                            setState(() {
-                              _scheduleMode = selection.first;
-                            });
-                          },
-                        ),
-                      if (!_isEdit) const SizedBox(height: 10),
-                      if (_isEdit || _scheduleMode == _ScheduleMode.oneTime)
-                        OutlinedButton.icon(
-                          onPressed: _pickExpectedDateTime,
-                          icon: const Icon(Icons.schedule),
-                          label: Text(
-                            'Expected Answer Time: ${formatDateTime(_expectedAt)}',
-                          ),
-                        ),
-                      if (!_isEdit && _scheduleMode == _ScheduleMode.weekdays)
+                  return Form(
+                    key: _formKey,
+                    child: ListView(
+                      padding: appPagePadding,
+                      children: [
                         Card(
                           child: Padding(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(14),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    OutlinedButton.icon(
-                                      onPressed: _pickRepeatStartDate,
-                                      icon: const Icon(Icons.calendar_today),
-                                      label: Text(
-                                        'Start: ${_formatDateOnly(_repeatStartDate)}',
-                                      ),
-                                    ),
-                                    OutlinedButton.icon(
-                                      onPressed: _pickRepeatEndDate,
-                                      icon: const Icon(Icons.event_available),
-                                      label: Text(
-                                        'End: ${_formatDateOnly(_repeatEndDate)}',
-                                      ),
-                                    ),
-                                    OutlinedButton.icon(
-                                      onPressed: _pickRepeatTime,
-                                      icon: const Icon(Icons.access_time),
-                                      label: Text(
-                                        'Time: ${_repeatTime.format(context)}',
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'Days',
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (var day = 1; day <= 7; day++)
-                                      FilterChip(
-                                        label: Text(_weekdayShortLabel(day)),
-                                        selected: _selectedWeekdays.contains(
-                                          day,
+                                DropdownButtonFormField<String>(
+                                  initialValue: _selectedEmployeeId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Employee',
+                                  ),
+                                  items: employees
+                                      .map(
+                                        (employee) => DropdownMenuItem(
+                                          value: employee.id,
+                                          child: Text(
+                                            '${employee.fullName} (@${employee.username})',
+                                          ),
                                         ),
-                                        onSelected: (selected) {
-                                          setState(() {
-                                            if (selected) {
-                                              _selectedWeekdays.add(day);
-                                            } else {
-                                              _selectedWeekdays.remove(day);
-                                            }
-                                          });
-                                        },
-                                      ),
-                                  ],
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    setState(() => _selectedEmployeeId = value);
+                                  },
+                                  validator: (value) => value == null
+                                      ? 'Employee is required.'
+                                      : null,
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Will create $recurringCount task${recurringCount == 1 ? '' : 's'} in this range.',
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _titleController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Task Title',
+                                  ),
+                                  validator: (value) {
+                                    if (value == null || value.trim().isEmpty) {
+                                      return 'Title is required.';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _instructionsController,
+                                  minLines: 2,
+                                  maxLines: 4,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Instructions',
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                         ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text(
-                            'Questions',
-                            style: Theme.of(context).textTheme.titleMedium,
+                        const SizedBox(height: 12),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Schedule',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 10),
+                                if (!_isEdit)
+                                  SegmentedButton<_ScheduleMode>(
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: _ScheduleMode.oneTime,
+                                        icon: Icon(Icons.event),
+                                        label: Text('One Time'),
+                                      ),
+                                      ButtonSegment(
+                                        value: _ScheduleMode.weekdays,
+                                        icon: Icon(Icons.calendar_view_week),
+                                        label: Text('Weekdays'),
+                                      ),
+                                    ],
+                                    selected: {_scheduleMode},
+                                    onSelectionChanged: (selection) {
+                                      setState(() {
+                                        _scheduleMode = selection.first;
+                                      });
+                                    },
+                                  ),
+                                if (!_isEdit) const SizedBox(height: 10),
+                                if (_isEdit ||
+                                    _scheduleMode == _ScheduleMode.oneTime)
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: _pickShowDateTime,
+                                        icon: const Icon(
+                                          Icons.visibility_outlined,
+                                        ),
+                                        label: Text(
+                                          'Show Time: ${formatDateTime(_showAt)}',
+                                        ),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: _pickExpectedDateTime,
+                                        icon: const Icon(Icons.schedule),
+                                        label: Text(
+                                          'Expected Answer Time: ${formatDateTime(_expectedAt)}',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                if (!_isEdit &&
+                                    _scheduleMode == _ScheduleMode.weekdays)
+                                  Container(
+                                    margin: const EdgeInsets.only(top: 2),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF8FBFF),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            OutlinedButton.icon(
+                                              onPressed: _pickRepeatStartDate,
+                                              icon: const Icon(
+                                                Icons.calendar_today,
+                                              ),
+                                              label: Text(
+                                                'Start: ${_formatDateOnly(_repeatStartDate)}',
+                                              ),
+                                            ),
+                                            OutlinedButton.icon(
+                                              onPressed: _pickRepeatEndDate,
+                                              icon: const Icon(
+                                                Icons.event_available,
+                                              ),
+                                              label: Text(
+                                                'End: ${_formatDateOnly(_repeatEndDate)}',
+                                              ),
+                                            ),
+                                            OutlinedButton.icon(
+                                              onPressed: _pickRepeatTime,
+                                              icon: const Icon(
+                                                Icons.visibility_outlined,
+                                              ),
+                                              label: Text(
+                                                'Show Time: ${_repeatShowTime.format(context)}',
+                                              ),
+                                            ),
+                                            OutlinedButton.icon(
+                                              onPressed:
+                                                  _pickRepeatExpectedTime,
+                                              icon: const Icon(
+                                                Icons.access_time,
+                                              ),
+                                              label: Text(
+                                                'Expected Time: ${_repeatExpectedTime.format(context)}',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Days',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            for (var day = 1; day <= 7; day++)
+                                              FilterChip(
+                                                label: Text(
+                                                  _weekdayShortLabel(day),
+                                                ),
+                                                selected: _selectedWeekdays
+                                                    .contains(day),
+                                                onSelected: (selected) {
+                                                  setState(() {
+                                                    if (selected) {
+                                                      _selectedWeekdays.add(
+                                                        day,
+                                                      );
+                                                    } else {
+                                                      _selectedWeekdays.remove(
+                                                        day,
+                                                      );
+                                                    }
+                                                  });
+                                                },
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Will create $recurringCount task${recurringCount == 1 ? '' : 's'} in this range.',
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                          const Spacer(),
-                          IconButton(
-                            onPressed: _addQuestion,
-                            icon: const Icon(Icons.add_circle_outline),
-                            tooltip: 'Add Question',
+                        ),
+                        const SizedBox(height: 12),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Questions',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const Spacer(),
+                                FilledButton.tonalIcon(
+                                  onPressed: _addQuestion,
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  label: const Text('Add'),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      for (var i = 0; i < _questions.length; i++)
-                        _QuestionCard(
-                          index: i,
-                          question: _questions[i],
-                          onDelete: () => _removeQuestion(i),
                         ),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: _isLoading ? null : _save,
-                        icon: const Icon(Icons.save),
-                        label: Text(
-                          _isLoading
-                              ? 'Saving...'
-                              : _isEdit
-                              ? 'Save Task'
-                              : _scheduleMode == _ScheduleMode.weekdays
-                              ? 'Create Scheduled Tasks'
-                              : 'Save Task',
+                        const SizedBox(height: 8),
+                        for (var i = 0; i < _questions.length; i++)
+                          _QuestionCard(
+                            index: i,
+                            question: _questions[i],
+                            onDelete: () => _removeQuestion(i),
+                          ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _isLoading ? null : _save,
+                          icon: const Icon(Icons.save),
+                          label: Text(
+                            _isLoading
+                                ? 'Saving...'
+                                : _isEdit
+                                ? 'Save Task'
+                                : _scheduleMode == _ScheduleMode.weekdays
+                                ? 'Create Scheduled Tasks'
+                                : 'Save Task',
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      ),
     );
   }
 }
@@ -637,16 +817,22 @@ class _QuestionDraftForm {
     String prompt = '',
     this.type = QuestionInputType.text,
     String options = '',
+    String unwantedAnswer = '',
   }) : promptController = TextEditingController(text: prompt),
-       optionsController = TextEditingController(text: options);
+       optionsController = TextEditingController(text: options),
+       unwantedAnswerController = TextEditingController(text: unwantedAnswer),
+       notifyOnUnwantedAnswer = unwantedAnswer.trim().isNotEmpty;
 
   final TextEditingController promptController;
   final TextEditingController optionsController;
+  final TextEditingController unwantedAnswerController;
   QuestionInputType type;
+  bool notifyOnUnwantedAnswer;
 
   void dispose() {
     promptController.dispose();
     optionsController.dispose();
+    unwantedAnswerController.dispose();
   }
 }
 
@@ -681,24 +867,22 @@ class _QuestionCardState extends State<_QuestionCard> {
                 const Spacer(),
                 IconButton(
                   onPressed: widget.onDelete,
-                  icon: const Icon(Icons.delete_outline),
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  color: Colors.red.shade700,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.red.shade50,
+                  ),
                 ),
               ],
             ),
             TextFormField(
               controller: widget.question.promptController,
-              decoration: const InputDecoration(
-                labelText: 'Prompt',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: 'Prompt'),
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<QuestionInputType>(
               initialValue: widget.question.type,
-              decoration: const InputDecoration(
-                labelText: 'Input Type',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: 'Input Type'),
               items: QuestionInputType.values
                   .map(
                     (type) =>
@@ -720,7 +904,31 @@ class _QuestionCardState extends State<_QuestionCard> {
                   labelText: widget.question.type == QuestionInputType.buttons
                       ? 'Buttons (comma separated)'
                       : 'Options (comma separated)',
-                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              value: widget.question.notifyOnUnwantedAnswer,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Notify if answer is not what I want',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  widget.question.notifyOnUnwantedAnswer = value;
+                });
+              },
+            ),
+            if (widget.question.notifyOnUnwantedAnswer) ...[
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: widget.question.unwantedAnswerController,
+                decoration: const InputDecoration(
+                  labelText: 'Unwanted answer',
+                  helperText:
+                      'Exact answer text that should trigger a notification.',
                 ),
               ),
             ],
@@ -729,4 +937,11 @@ class _QuestionCardState extends State<_QuestionCard> {
       ),
     );
   }
+}
+
+class _ScheduledDatePair {
+  const _ScheduledDatePair({required this.showAt, required this.expectedAt});
+
+  final DateTime showAt;
+  final DateTime expectedAt;
 }
