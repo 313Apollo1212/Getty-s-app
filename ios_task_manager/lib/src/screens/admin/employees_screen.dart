@@ -5,6 +5,8 @@ import '../../models/profile.dart';
 import '../../services/supabase_service.dart';
 import '../../ui/app_theme.dart';
 
+enum _UserViewFilter { all, admins, employees }
+
 class EmployeesScreen extends StatefulWidget {
   const EmployeesScreen({super.key, required this.service});
 
@@ -16,6 +18,8 @@ class EmployeesScreen extends StatefulWidget {
 
 class _EmployeesScreenState extends State<EmployeesScreen> {
   late Future<List<Profile>> _usersFuture;
+  final TextEditingController _searchController = TextEditingController();
+  _UserViewFilter _viewFilter = _UserViewFilter.all;
 
   @override
   void initState() {
@@ -23,9 +27,15 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     _usersFuture = widget.service.fetchAllUsers();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _reload() async {
     setState(() {
-      _usersFuture = widget.service.fetchAllUsers();
+      _usersFuture = widget.service.fetchAllUsers(forceRefresh: true);
     });
   }
 
@@ -115,6 +125,47 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     }
   }
 
+  List<Profile> _applyUserFilters(List<Profile> users, String? viewerId) {
+    final query = _searchController.text.trim().toLowerCase();
+
+    var result = viewerId == null
+        ? users
+        : users.where((user) => user.id != viewerId).toList();
+
+    switch (_viewFilter) {
+      case _UserViewFilter.admins:
+        result = result.where((u) => u.role == AppRole.admin).toList();
+      case _UserViewFilter.employees:
+        result = result.where((u) => u.role == AppRole.employee).toList();
+      case _UserViewFilter.all:
+        break;
+    }
+
+    if (query.isNotEmpty) {
+      result = result.where((user) {
+        final roleLabel = user.role == AppRole.admin ? 'admin' : 'employee';
+        return user.fullName.toLowerCase().contains(query) ||
+            user.username.toLowerCase().contains(query) ||
+            roleLabel.contains(query);
+      }).toList();
+    }
+
+    result.sort(
+      (a, b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
+    );
+    return result;
+  }
+
+  Widget _buildFilterChip(String label, bool selected, VoidCallback onTap) {
+    return ChoiceChip(
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppBackground(
@@ -155,73 +206,114 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                 .where((u) => u.role == AppRole.admin)
                 .length;
             final employeeCount = visibleUsers.length - adminCount;
+            final filteredUsers = _applyUserFilters(users, viewerId);
 
-            return ListView.separated(
+            return ListView(
               padding: appPagePadding,
-              itemCount: visibleUsers.length + 1,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                Chip(
-                                  avatar: const Icon(
-                                    Icons.groups_2_outlined,
-                                    size: 16,
-                                  ),
-                                  label: Text('Users ${visibleUsers.length}'),
-                                ),
-                                Chip(
-                                  avatar: const Icon(
-                                    Icons.admin_panel_settings_outlined,
-                                    size: 16,
-                                  ),
-                                  label: Text('Admins $adminCount'),
-                                ),
-                                Chip(
-                                  avatar: const Icon(
-                                    Icons.badge_outlined,
-                                    size: 16,
-                                  ),
-                                  label: Text('Employees $employeeCount'),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          FilledButton.icon(
-                            onPressed: _openCreateUserDialog,
-                            icon: const Icon(Icons.person_add_alt_1),
-                            label: const Text('Add User'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                final profile = visibleUsers[index - 1];
-                final isAdmin = profile.role == AppRole.admin;
-                final isCurrentUser = viewerId == profile.id;
-
-                return Card(
+              children: [
+                Card(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    child: Row(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 20,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Users',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: _openCreateUserDialog,
+                              icon: const Icon(
+                                Icons.person_add_alt_1,
+                                size: 18,
+                              ),
+                              label: const Text('Add'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _searchController,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: 'Search users',
+                            prefixIcon: const Icon(Icons.search, size: 18),
+                            suffixIcon: _searchController.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
+                                    icon: const Icon(Icons.close, size: 18),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _buildFilterChip(
+                              'All (${visibleUsers.length})',
+                              _viewFilter == _UserViewFilter.all,
+                              () => setState(
+                                () => _viewFilter = _UserViewFilter.all,
+                              ),
+                            ),
+                            _buildFilterChip(
+                              'Admins ($adminCount)',
+                              _viewFilter == _UserViewFilter.admins,
+                              () => setState(
+                                () => _viewFilter = _UserViewFilter.admins,
+                              ),
+                            ),
+                            _buildFilterChip(
+                              'Employees ($employeeCount)',
+                              _viewFilter == _UserViewFilter.employees,
+                              () => setState(
+                                () => _viewFilter = _UserViewFilter.employees,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${filteredUsers.length} shown',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if (filteredUsers.isEmpty)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No users match your filters.'),
+                    ),
+                  )
+                else
+                  ...filteredUsers.map((profile) {
+                    final isAdmin = profile.role == AppRole.admin;
+                    final isCurrentUser = viewerId == profile.id;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 2,
+                        ),
+                        leading: CircleAvatar(
+                          radius: 18,
                           backgroundColor: Theme.of(
                             context,
                           ).colorScheme.primaryContainer,
@@ -235,23 +327,18 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                profile.fullName,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 2),
-                              Text('@${profile.username}'),
-                            ],
-                          ),
+                        title: Text(
+                          profile.fullName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        const SizedBox(width: 8),
-                        Chip(label: Text(isAdmin ? 'Admin' : 'Employee')),
-                        PopupMenuButton<_UserMenuAction>(
+                        subtitle: Text(
+                          '@${profile.username} · ${isAdmin ? 'Admin' : 'Employee'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: PopupMenuButton<_UserMenuAction>(
                           tooltip: 'Actions',
                           onSelected: (action) => _onUserMenuSelected(
                             action,
@@ -281,11 +368,10 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+                      ),
+                    );
+                  }),
+              ],
             );
           },
         ),

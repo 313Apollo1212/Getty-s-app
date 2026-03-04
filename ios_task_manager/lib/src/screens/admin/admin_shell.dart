@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/profile.dart';
 import '../../services/supabase_service.dart';
 import '../profile_screen.dart';
+import 'admin_dashboard_screen.dart';
 import 'admin_tasks_screen.dart';
 import 'employees_screen.dart';
 import 'task_alerts_screen.dart';
@@ -24,10 +25,17 @@ class AdminShell extends StatefulWidget {
 class _AdminShellState extends State<AdminShell> {
   int _index = 0;
   int _alertCount = 0;
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _pages = [
+      AdminDashboardScreen(service: widget.service),
+      AdminTasksScreen(service: widget.service),
+      EmployeesScreen(service: widget.service),
+      ProfileScreen(service: widget.service, currentUser: widget.currentUser),
+    ];
     _loadAlertCount();
   }
 
@@ -54,70 +62,109 @@ class _AdminShellState extends State<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      AdminTasksScreen(service: widget.service),
-      EmployeesScreen(service: widget.service),
-      ProfileScreen(service: widget.service, currentUser: widget.currentUser),
-    ];
+    final topInset = MediaQuery.paddingOf(context).top;
+    const bellHitBox = 34.0;
+    final bellTop = ((topInset - bellHitBox) / 2 + 10).clamp(0.0, 28.0);
+    const barHeight = 66.0;
+    const topHeaderHeight = 44.0;
+    final barColor =
+        Theme.of(context).navigationBarTheme.backgroundColor ??
+        Theme.of(context).colorScheme.surface;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Admin Dashboard'),
-            Text(
-              widget.currentUser.fullName,
-              style: Theme.of(context).textTheme.bodySmall,
+      body: Column(
+        children: [
+          Container(
+            height: topInset + topHeaderHeight,
+            color: barColor,
+            child: Stack(
+              children: [
+                Positioned(
+                  top: bellTop,
+                  right: 26,
+                  child: IconButton(
+                    onPressed: _openAlerts,
+                    tooltip: 'Alerts',
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(bellHitBox, bellHitBox),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Badge(
+                      isLabelVisible: _alertCount > 0,
+                      label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
+                      child: const Icon(
+                        Icons.notifications_none_rounded,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          if (_index == 0)
-            IconButton(
-              onPressed: _openAlerts,
-              tooltip: 'Alerts',
-              icon: Badge(
-                isLabelVisible: _alertCount > 0,
-                label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
-                child: const Icon(Icons.notifications_none_rounded),
-              ),
-            ),
-          IconButton(
-            onPressed: () async {
-              await widget.service.signOut();
-            },
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Sign Out',
+          ),
+          Expanded(
+            child: IndexedStack(index: _index, children: _pages),
           ),
         ],
       ),
-      body: pages[_index],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (value) async {
-          setState(() => _index = value);
-          if (value == 0) {
+      bottomNavigationBar: SizedBox(
+        height: barHeight,
+        child: NavigationBar(
+          height: barHeight,
+          selectedIndex: _index,
+          onDestinationSelected: (value) async {
+            setState(() => _index = value);
             await _loadAlertCount();
-          }
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.checklist_outlined),
-            selectedIcon: Icon(Icons.checklist),
-            label: 'Tasks',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            selectedIcon: Icon(Icons.people),
-            label: 'Users',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
+          },
+          destinations: [
+            const NavigationDestination(
+              icon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.space_dashboard_outlined),
+              ),
+              selectedIcon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.space_dashboard),
+              ),
+              label: 'Dashboard',
+            ),
+            const NavigationDestination(
+              icon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.checklist_outlined),
+              ),
+              selectedIcon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.checklist),
+              ),
+              label: 'Tasks',
+            ),
+            const NavigationDestination(
+              icon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.people_outline),
+              ),
+              selectedIcon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.people),
+              ),
+              label: 'Users',
+            ),
+            const NavigationDestination(
+              icon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.person_outline),
+              ),
+              selectedIcon: Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Icon(Icons.person),
+              ),
+              label: 'Profile',
+            ),
+          ],
+        ),
       ),
     );
   }

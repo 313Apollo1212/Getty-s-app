@@ -8,6 +8,8 @@ import '../../utils/time_format.dart';
 
 enum _ScheduleMode { oneTime, weekdays }
 
+enum _RecurringStopMode { endDate, untilStopped }
+
 class TaskEditorScreen extends StatefulWidget {
   const TaskEditorScreen({
     super.key,
@@ -23,6 +25,9 @@ class TaskEditorScreen extends StatefulWidget {
 }
 
 class _TaskEditorScreenState extends State<TaskEditorScreen> {
+  static const int _maxRecurringTasks = 500;
+  static const int _untilStoppedHorizonDays = 3650;
+
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _instructionsController = TextEditingController();
@@ -34,6 +39,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   bool _isLoadingQuestions = false;
 
   _ScheduleMode _scheduleMode = _ScheduleMode.oneTime;
+  _RecurringStopMode _recurringStopMode = _RecurringStopMode.endDate;
   DateTime _repeatStartDate = DateUtils.dateOnly(DateTime.now());
   DateTime _repeatEndDate = DateUtils.dateOnly(
     DateTime.now().add(const Duration(days: 14)),
@@ -114,6 +120,10 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     }
   }
 
+  DateTime _combineDateAndTime(DateTime date, TimeOfDay time) {
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
   Future<void> _pickShowDateTime() async {
     final now = DateTime.now();
     final pickedDate = await showDatePicker(
@@ -137,13 +147,10 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     }
 
     setState(() {
-      _showAt = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
+      _showAt = _combineDateAndTime(pickedDate, pickedTime);
+      if (_expectedAt.isBefore(_showAt)) {
+        _expectedAt = _showAt.add(const Duration(hours: 1));
+      }
     });
   }
 
@@ -170,13 +177,13 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     }
 
     setState(() {
-      _expectedAt = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
+      _expectedAt = _combineDateAndTime(pickedDate, pickedTime);
+    });
+  }
+
+  void _setExpectedOffset(Duration offset) {
+    setState(() {
+      _expectedAt = _showAt.add(offset);
     });
   }
 
@@ -217,7 +224,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     });
   }
 
-  Future<void> _pickRepeatTime() async {
+  Future<void> _pickRepeatShowTime() async {
     final pickedTime = await showTimePicker(
       context: context,
       initialTime: _repeatShowTime,
@@ -229,6 +236,12 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
     setState(() {
       _repeatShowTime = pickedTime;
+      final showTotal = pickedTime.hour * 60 + pickedTime.minute;
+      final dueTotal =
+          _repeatExpectedTime.hour * 60 + _repeatExpectedTime.minute;
+      if (dueTotal < showTotal) {
+        _repeatExpectedTime = pickedTime;
+      }
     });
   }
 
@@ -263,14 +276,40 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     });
   }
 
+  void _toggleWeekday(int day, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedWeekdays.add(day);
+      } else {
+        _selectedWeekdays.remove(day);
+      }
+    });
+  }
+
+  void _selectPresetWeekdays(Set<int> days) {
+    setState(() {
+      _selectedWeekdays
+        ..clear()
+        ..addAll(days);
+    });
+  }
+
+  int _timeOfDayToMinutes(TimeOfDay time) => time.hour * 60 + time.minute;
+
   List<_ScheduledDatePair> _buildRecurringSchedule() {
     final start = DateUtils.dateOnly(_repeatStartDate);
-    final end = DateUtils.dateOnly(_repeatEndDate);
+    final end = _recurringStopMode == _RecurringStopMode.endDate
+        ? DateUtils.dateOnly(_repeatEndDate)
+        : DateUtils.dateOnly(
+            _repeatStartDate.add(
+              const Duration(days: _untilStoppedHorizonDays),
+            ),
+          );
 
     final schedule = <_ScheduledDatePair>[];
     for (
       DateTime date = start;
-      !date.isAfter(end);
+      !date.isAfter(end) && schedule.length < _maxRecurringTasks;
       date = date.add(const Duration(days: 1))
     ) {
       if (_selectedWeekdays.contains(date.weekday)) {
@@ -377,7 +416,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         );
         return;
       }
-      if (_repeatEndDate.isBefore(_repeatStartDate)) {
+      if (_recurringStopMode == _RecurringStopMode.endDate &&
+          _repeatEndDate.isBefore(_repeatStartDate)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('End date must be on or after start date.'),
@@ -386,9 +426,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         return;
       }
 
-      if (_repeatShowTime.hour > _repeatExpectedTime.hour ||
-          (_repeatShowTime.hour == _repeatExpectedTime.hour &&
-              _repeatShowTime.minute > _repeatExpectedTime.minute)) {
+      if (_timeOfDayToMinutes(_repeatShowTime) >
+          _timeOfDayToMinutes(_repeatExpectedTime)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -442,18 +481,6 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
           return;
         }
 
-        if (schedule.length > 500) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Too many tasks at once (max 500). Reduce the date range.',
-              ),
-            ),
-          );
-          setState(() => _isLoading = false);
-          return;
-        }
-
         for (final item in schedule) {
           if (item.showAt.isAfter(item.expectedAt)) {
             continue;
@@ -468,8 +495,24 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
               questions: draftQuestions,
             ),
           );
+          createdCount++;
         }
-        createdCount = schedule.length;
+
+        if (!mounted) {
+          return;
+        }
+
+        if (createdCount == 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No tasks were created. Check show/expected times and schedule.',
+              ),
+            ),
+          );
+          setState(() => _isLoading = false);
+          return;
+        }
       }
 
       if (!mounted) {
@@ -477,9 +520,15 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
       }
 
       if (!_isEdit && _scheduleMode == _ScheduleMode.weekdays) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Created $createdCount tasks.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _recurringStopMode == _RecurringStopMode.untilStopped
+                  ? 'Started repeating schedule. Created $createdCount upcoming tasks.'
+                  : 'Created $createdCount tasks.',
+            ),
+          ),
+        );
       }
 
       Navigator.of(context).pop(true);
@@ -517,6 +566,374 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
     return '$month/$day/${local.year}';
   }
 
+  String _selectedDaysLabel() {
+    if (_selectedWeekdays.isEmpty) {
+      return 'No days selected';
+    }
+
+    final sorted = _selectedWeekdays.toList()..sort();
+    return sorted.map(_weekdayShortLabel).join(', ');
+  }
+
+  Widget _buildBasicsSection(List<Profile> employees) {
+    return _SectionCard(
+      title: '1. Task Details',
+      subtitle: 'Pick who gets this task and what they need to do.',
+      child: Column(
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selectedEmployeeId,
+            decoration: const InputDecoration(labelText: 'Employee'),
+            items: employees
+                .map(
+                  (employee) => DropdownMenuItem(
+                    value: employee.id,
+                    child: Text('${employee.fullName} (@${employee.username})'),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() => _selectedEmployeeId = value);
+            },
+            validator: (value) =>
+                value == null ? 'Employee is required.' : null,
+          ),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: _titleController,
+            decoration: const InputDecoration(labelText: 'Task Title'),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Title is required.';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: _instructionsController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'Instructions (optional)',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOneTimeScheduleSection() {
+    final gap = _expectedAt.difference(_showAt);
+    final gapLabel = gap.inMinutes >= 0
+        ? '${gap.inHours}h ${gap.inMinutes % 60}m between show and due'
+        : 'Due time is before show time';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DateTimeFieldTile(
+          icon: Icons.visibility_outlined,
+          title: 'Show task to employee',
+          value: formatDateTime(_showAt),
+          onTap: _pickShowDateTime,
+        ),
+        const SizedBox(height: 8),
+        _DateTimeFieldTile(
+          icon: Icons.schedule,
+          title: 'Expected answer time',
+          value: formatDateTime(_expectedAt),
+          onTap: _pickExpectedDateTime,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Quick due time shortcuts',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton(
+              onPressed: () => _setExpectedOffset(const Duration(minutes: 30)),
+              child: const Text('+30 min'),
+            ),
+            OutlinedButton(
+              onPressed: () => _setExpectedOffset(const Duration(hours: 1)),
+              child: const Text('+1 hour'),
+            ),
+            OutlinedButton(
+              onPressed: () => _setExpectedOffset(const Duration(hours: 2)),
+              child: const Text('+2 hours'),
+            ),
+            OutlinedButton(
+              onPressed: () => _setExpectedOffset(const Duration(hours: 4)),
+              child: const Text('+4 hours'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEEF5E2),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            gapLabel,
+            style: const TextStyle(
+              color: Color(0xFF121A0F),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecurringScheduleSection(int recurringCount) {
+    final usesCap =
+        _recurringStopMode == _RecurringStopMode.untilStopped &&
+        recurringCount >= _maxRecurringTasks;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8EC),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Repeat until', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          SegmentedButton<_RecurringStopMode>(
+            segments: const [
+              ButtonSegment(
+                value: _RecurringStopMode.endDate,
+                icon: Icon(Icons.event_available_outlined),
+                label: Text('End Date'),
+              ),
+              ButtonSegment(
+                value: _RecurringStopMode.untilStopped,
+                icon: Icon(Icons.loop_rounded),
+                label: Text('Until Stopped'),
+              ),
+            ],
+            selected: {_recurringStopMode},
+            onSelectionChanged: (selection) {
+              setState(() {
+                _recurringStopMode = selection.first;
+              });
+            },
+          ),
+          const SizedBox(height: 10),
+          Text('Date Range', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          _DateTimeFieldTile(
+            icon: Icons.event_note_outlined,
+            title: 'Start date',
+            value: _formatDateOnly(_repeatStartDate),
+            onTap: _pickRepeatStartDate,
+            compact: true,
+          ),
+          if (_recurringStopMode == _RecurringStopMode.endDate) ...[
+            const SizedBox(height: 6),
+            _DateTimeFieldTile(
+              icon: Icons.event_available_outlined,
+              title: 'End date',
+              value: _formatDateOnly(_repeatEndDate),
+              onTap: _pickRepeatEndDate,
+              compact: true,
+            ),
+          ] else ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEEF5E2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Repeats every selected week until you stop it.',
+                style: TextStyle(
+                  color: Color(0xFF121A0F),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Text('Daily Times', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          _DateTimeFieldTile(
+            icon: Icons.visibility_outlined,
+            title: 'Show time',
+            value: _repeatShowTime.format(context),
+            onTap: _pickRepeatShowTime,
+            compact: true,
+          ),
+          const SizedBox(height: 6),
+          _DateTimeFieldTile(
+            icon: Icons.schedule_outlined,
+            title: 'Expected time',
+            value: _repeatExpectedTime.format(context),
+            onTap: _pickRepeatExpectedTime,
+            compact: true,
+          ),
+          const SizedBox(height: 10),
+          Text('Weekdays', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var day = 1; day <= 7; day++)
+                FilterChip(
+                  label: Text(_weekdayShortLabel(day)),
+                  selected: _selectedWeekdays.contains(day),
+                  onSelected: (selected) => _toggleWeekday(day, selected),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: () => _selectPresetWeekdays({
+                  DateTime.monday,
+                  DateTime.tuesday,
+                  DateTime.wednesday,
+                  DateTime.thursday,
+                  DateTime.friday,
+                }),
+                child: const Text('Mon-Fri'),
+              ),
+              OutlinedButton(
+                onPressed: () => _selectPresetWeekdays({
+                  DateTime.monday,
+                  DateTime.tuesday,
+                  DateTime.wednesday,
+                  DateTime.thursday,
+                  DateTime.friday,
+                  DateTime.saturday,
+                  DateTime.sunday,
+                }),
+                child: const Text('All week'),
+              ),
+              OutlinedButton(
+                onPressed: () =>
+                    _selectPresetWeekdays({DateTime.saturday, DateTime.sunday}),
+                child: const Text('Weekend'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEEF5E2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Selected days: ${_selectedDaysLabel()}',
+                  style: const TextStyle(
+                    color: Color(0xFF121A0F),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _recurringStopMode == _RecurringStopMode.endDate
+                      ? 'Will create $recurringCount task${recurringCount == 1 ? '' : 's'} in this range.'
+                      : usesCap
+                      ? 'Creating $recurringCount upcoming tasks now. This will keep repeating weekly until stopped.'
+                      : 'Will create $recurringCount upcoming tasks and keep repeating weekly until stopped.',
+                  style: const TextStyle(
+                    color: Color(0xFF121A0F),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleSection(int recurringCount) {
+    return _SectionCard(
+      title: '2. Schedule',
+      subtitle: 'When the task appears and when the answer is expected.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!_isEdit)
+            SegmentedButton<_ScheduleMode>(
+              segments: const [
+                ButtonSegment(
+                  value: _ScheduleMode.oneTime,
+                  icon: Icon(Icons.event),
+                  label: Text('One Time'),
+                ),
+                ButtonSegment(
+                  value: _ScheduleMode.weekdays,
+                  icon: Icon(Icons.calendar_view_week),
+                  label: Text('Repeat by Weekday'),
+                ),
+              ],
+              selected: {_scheduleMode},
+              onSelectionChanged: (selection) {
+                setState(() {
+                  _scheduleMode = selection.first;
+                });
+              },
+            ),
+          if (!_isEdit) const SizedBox(height: 10),
+          if (_isEdit || _scheduleMode == _ScheduleMode.oneTime)
+            _buildOneTimeScheduleSection(),
+          if (!_isEdit && _scheduleMode == _ScheduleMode.weekdays)
+            _buildRecurringScheduleSection(recurringCount),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuestionsSection() {
+    return Column(
+      children: [
+        _SectionCard(
+          title: '3. Questions',
+          subtitle: 'Add the questions employees will answer for this task.',
+          trailing: FilledButton.tonalIcon(
+            onPressed: _addQuestion,
+            icon: const Icon(Icons.add_circle_outline),
+            label: const Text('Add Question'),
+          ),
+          child: const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 8),
+        for (var i = 0; i < _questions.length; i++)
+          _QuestionCard(
+            index: i,
+            question: _questions[i],
+            onDelete: () => _removeQuestion(i),
+            canDelete: _questions.length > 1,
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final recurringCount = _buildRecurringSchedule().length;
@@ -544,269 +961,151 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
                     child: ListView(
                       padding: appPagePadding,
                       children: [
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              children: [
-                                DropdownButtonFormField<String>(
-                                  initialValue: _selectedEmployeeId,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Employee',
-                                  ),
-                                  items: employees
-                                      .map(
-                                        (employee) => DropdownMenuItem(
-                                          value: employee.id,
-                                          child: Text(
-                                            '${employee.fullName} (@${employee.username})',
-                                          ),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (value) {
-                                    setState(() => _selectedEmployeeId = value);
-                                  },
-                                  validator: (value) => value == null
-                                      ? 'Employee is required.'
-                                      : null,
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _titleController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Task Title',
-                                  ),
-                                  validator: (value) {
-                                    if (value == null || value.trim().isEmpty) {
-                                      return 'Title is required.';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _instructionsController,
-                                  minLines: 2,
-                                  maxLines: 4,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Instructions',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                        _buildBasicsSection(employees),
                         const SizedBox(height: 12),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Schedule',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 10),
-                                if (!_isEdit)
-                                  SegmentedButton<_ScheduleMode>(
-                                    segments: const [
-                                      ButtonSegment(
-                                        value: _ScheduleMode.oneTime,
-                                        icon: Icon(Icons.event),
-                                        label: Text('One Time'),
-                                      ),
-                                      ButtonSegment(
-                                        value: _ScheduleMode.weekdays,
-                                        icon: Icon(Icons.calendar_view_week),
-                                        label: Text('Weekdays'),
-                                      ),
-                                    ],
-                                    selected: {_scheduleMode},
-                                    onSelectionChanged: (selection) {
-                                      setState(() {
-                                        _scheduleMode = selection.first;
-                                      });
-                                    },
-                                  ),
-                                if (!_isEdit) const SizedBox(height: 10),
-                                if (_isEdit ||
-                                    _scheduleMode == _ScheduleMode.oneTime)
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      OutlinedButton.icon(
-                                        onPressed: _pickShowDateTime,
-                                        icon: const Icon(
-                                          Icons.visibility_outlined,
-                                        ),
-                                        label: Text(
-                                          'Show Time: ${formatDateTime(_showAt)}',
-                                        ),
-                                      ),
-                                      OutlinedButton.icon(
-                                        onPressed: _pickExpectedDateTime,
-                                        icon: const Icon(Icons.schedule),
-                                        label: Text(
-                                          'Expected Answer Time: ${formatDateTime(_expectedAt)}',
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                if (!_isEdit &&
-                                    _scheduleMode == _ScheduleMode.weekdays)
-                                  Container(
-                                    margin: const EdgeInsets.only(top: 2),
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF8FBFF),
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: [
-                                            OutlinedButton.icon(
-                                              onPressed: _pickRepeatStartDate,
-                                              icon: const Icon(
-                                                Icons.calendar_today,
-                                              ),
-                                              label: Text(
-                                                'Start: ${_formatDateOnly(_repeatStartDate)}',
-                                              ),
-                                            ),
-                                            OutlinedButton.icon(
-                                              onPressed: _pickRepeatEndDate,
-                                              icon: const Icon(
-                                                Icons.event_available,
-                                              ),
-                                              label: Text(
-                                                'End: ${_formatDateOnly(_repeatEndDate)}',
-                                              ),
-                                            ),
-                                            OutlinedButton.icon(
-                                              onPressed: _pickRepeatTime,
-                                              icon: const Icon(
-                                                Icons.visibility_outlined,
-                                              ),
-                                              label: Text(
-                                                'Show Time: ${_repeatShowTime.format(context)}',
-                                              ),
-                                            ),
-                                            OutlinedButton.icon(
-                                              onPressed:
-                                                  _pickRepeatExpectedTime,
-                                              icon: const Icon(
-                                                Icons.access_time,
-                                              ),
-                                              label: Text(
-                                                'Expected Time: ${_repeatExpectedTime.format(context)}',
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          'Days',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.titleSmall,
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: [
-                                            for (var day = 1; day <= 7; day++)
-                                              FilterChip(
-                                                label: Text(
-                                                  _weekdayShortLabel(day),
-                                                ),
-                                                selected: _selectedWeekdays
-                                                    .contains(day),
-                                                onSelected: (selected) {
-                                                  setState(() {
-                                                    if (selected) {
-                                                      _selectedWeekdays.add(
-                                                        day,
-                                                      );
-                                                    } else {
-                                                      _selectedWeekdays.remove(
-                                                        day,
-                                                      );
-                                                    }
-                                                  });
-                                                },
-                                              ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Will create $recurringCount task${recurringCount == 1 ? '' : 's'} in this range.',
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
+                        _buildScheduleSection(recurringCount),
                         const SizedBox(height: 12),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                            child: Row(
-                              children: [
-                                Text(
-                                  'Questions',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                                const Spacer(),
-                                FilledButton.tonalIcon(
-                                  onPressed: _addQuestion,
-                                  icon: const Icon(Icons.add_circle_outline),
-                                  label: const Text('Add'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        for (var i = 0; i < _questions.length; i++)
-                          _QuestionCard(
-                            index: i,
-                            question: _questions[i],
-                            onDelete: () => _removeQuestion(i),
-                          ),
+                        _buildQuestionsSection(),
                         const SizedBox(height: 12),
                         FilledButton.icon(
                           onPressed: _isLoading ? null : _save,
-                          icon: const Icon(Icons.save),
+                          icon: _isLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.save),
                           label: Text(
                             _isLoading
                                 ? 'Saving...'
                                 : _isEdit
-                                ? 'Save Task'
+                                ? 'Save Task Changes'
                                 : _scheduleMode == _ScheduleMode.weekdays
-                                ? 'Create Scheduled Tasks'
-                                : 'Save Task',
+                                ? _recurringStopMode ==
+                                          _RecurringStopMode.untilStopped
+                                      ? 'Start Weekly Repeat ($recurringCount queued)'
+                                      : 'Create $recurringCount Scheduled Task${recurringCount == 1 ? '' : 's'}'
+                                : 'Create Task',
                           ),
                         ),
+                        const SizedBox(height: 4),
                       ],
                     ),
                   );
                 },
               ),
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+    this.trailing,
+  });
+
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+              ],
+            ),
+            const SizedBox(height: 10),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DateTimeFieldTile extends StatelessWidget {
+  const _DateTimeFieldTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onTap,
+    this.compact = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: compact ? Colors.white : const Color(0xFFF4F8EC),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: compact ? 10 : 12,
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(value, style: Theme.of(context).textTheme.titleSmall),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.edit_calendar_outlined, size: 18),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -841,11 +1140,13 @@ class _QuestionCard extends StatefulWidget {
     required this.index,
     required this.question,
     required this.onDelete,
+    required this.canDelete,
   });
 
   final int index;
   final _QuestionDraftForm question;
   final VoidCallback onDelete;
+  final bool canDelete;
 
   @override
   State<_QuestionCard> createState() => _QuestionCardState();
@@ -863,26 +1164,27 @@ class _QuestionCardState extends State<_QuestionCard> {
           children: [
             Row(
               children: [
-                Text('Question ${widget.index + 1}'),
+                Text(
+                  'Question ${widget.index + 1}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const Spacer(),
-                IconButton(
-                  onPressed: widget.onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 20),
-                  color: Colors.red.shade700,
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.red.shade50,
-                  ),
+                TextButton.icon(
+                  onPressed: widget.canDelete ? widget.onDelete : null,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Remove'),
                 ),
               ],
             ),
+            const SizedBox(height: 6),
             TextFormField(
               controller: widget.question.promptController,
-              decoration: const InputDecoration(labelText: 'Prompt'),
+              decoration: const InputDecoration(labelText: 'Question text'),
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<QuestionInputType>(
               initialValue: widget.question.type,
-              decoration: const InputDecoration(labelText: 'Input Type'),
+              decoration: const InputDecoration(labelText: 'Answer type'),
               items: QuestionInputType.values
                   .map(
                     (type) =>
@@ -902,8 +1204,9 @@ class _QuestionCardState extends State<_QuestionCard> {
                 controller: widget.question.optionsController,
                 decoration: InputDecoration(
                   labelText: widget.question.type == QuestionInputType.buttons
-                      ? 'Buttons (comma separated)'
-                      : 'Options (comma separated)',
+                      ? 'Button labels (comma separated)'
+                      : 'Dropdown options (comma separated)',
+                  helperText: 'Example: Yes, No',
                 ),
               ),
             ],
@@ -912,7 +1215,7 @@ class _QuestionCardState extends State<_QuestionCard> {
               value: widget.question.notifyOnUnwantedAnswer,
               contentPadding: EdgeInsets.zero,
               title: const Text(
-                'Notify if answer is not what I want',
+                'Alert admin on unwanted answer',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
               onChanged: (value) {
@@ -927,8 +1230,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                 controller: widget.question.unwantedAnswerController,
                 decoration: const InputDecoration(
                   labelText: 'Unwanted answer',
-                  helperText:
-                      'Exact answer text that should trigger a notification.',
+                  helperText: 'Exact answer text that should trigger alert.',
                 ),
               ),
             ],

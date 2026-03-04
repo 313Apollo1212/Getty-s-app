@@ -35,13 +35,15 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
   Future<void> _load() async {
     setState(() => _isLoading = true);
     try {
-      final questions = await widget.service.fetchAssignmentQuestions(
-        widget.assignment.id,
-      );
-      final answers = await widget.service.fetchAnswersForAdminReview(
-        assignmentId: widget.assignment.id,
-        employeeId: widget.assignment.employeeId,
-      );
+      final results = await Future.wait<dynamic>([
+        widget.service.fetchAssignmentQuestions(widget.assignment.id),
+        widget.service.fetchAnswersForAdminReview(
+          assignmentId: widget.assignment.id,
+          employeeId: widget.assignment.employeeId,
+        ),
+      ]);
+      final questions = results[0] as List<AssignmentQuestion>;
+      final answers = results[1] as Map<String, QuestionAnswer>;
       if (!mounted) {
         return;
       }
@@ -256,7 +258,7 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: index.isEven
-                                        ? const Color(0xFFF8FBFF)
+                                        ? const Color(0xFFF4F8EC)
                                         : Colors.transparent,
                                     borderRadius: BorderRadius.circular(10),
                                   ),

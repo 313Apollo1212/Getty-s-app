@@ -213,18 +213,24 @@ class AssignmentQuestion {
 
 class QuestionAnswer {
   const QuestionAnswer({
+    required this.id,
     required this.questionId,
     required this.answerText,
     required this.answeredAt,
   });
 
+  final String id;
   final String questionId;
   final String answerText;
   final DateTime answeredAt;
 
   factory QuestionAnswer.fromMap(Map<String, dynamic> map) {
+    final idValue = map['id']?.toString();
+    final questionIdValue = map['question_id'] as String? ?? '';
+
     return QuestionAnswer(
-      questionId: map['question_id'] as String,
+      id: idValue == null || idValue.isEmpty ? questionIdValue : idValue,
+      questionId: questionIdValue,
       answerText: map['answer_text'] as String? ?? '',
       answeredAt: DateTime.parse(map['answered_at'] as String),
     );
@@ -265,6 +271,7 @@ class TaskAssignmentDraft {
 
 class FlaggedTaskAlert {
   const FlaggedTaskAlert({
+    required this.alertKey,
     required this.assignment,
     required this.question,
     required this.answerText,
@@ -272,9 +279,22 @@ class FlaggedTaskAlert {
     required this.answeredAt,
   });
 
+  final String alertKey;
   final TaskAssignment assignment;
   final AssignmentQuestion question;
   final String answerText;
   final String unwantedAnswer;
   final DateTime answeredAt;
+}
+
+class DashboardAnswerEntry {
+  const DashboardAnswerEntry({
+    required this.assignment,
+    required this.question,
+    required this.answer,
+  });
+
+  final TaskAssignment assignment;
+  final AssignmentQuestion question;
+  final QuestionAnswer answer;
 }

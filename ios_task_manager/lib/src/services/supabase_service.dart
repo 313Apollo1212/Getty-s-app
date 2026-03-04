@@ -1,9 +1,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/profile.dart';
 import '../models/task_models.dart';
 
 const _unwantedAnswerPrefix = '__meta:unwanted:';
+const _defaultCacheTtl = Duration(seconds: 30);
+const _dismissedAlertKeysStorageKey = 'dismissed_flagged_alert_keys_v1';
 
 class AppException implements Exception {
   const AppException(this.message);
@@ -18,6 +21,19 @@ class SupabaseService {
   SupabaseService(this._client);
 
   final SupabaseClient _client;
+  final Map<String, _TimedValue<List<TaskAssignment>>>
+  _employeeAssignmentsCache = {};
+  final Map<String, _TimedValue<List<AssignmentQuestion>>>
+  _assignmentQuestionsCache = {};
+  final Map<String, _TimedValue<Map<String, QuestionAnswer>>>
+  _answersByAssignmentAndEmployeeCache = {};
+
+  _TimedValue<List<Profile>>? _allUsersCache;
+  _TimedValue<List<Profile>>? _employeesOnlyCache;
+  _TimedValue<List<TaskAssignment>>? _allAssignmentsCache;
+  _TimedValue<List<FlaggedTaskAlert>>? _alertsCache;
+  _TimedValue<List<DashboardAnswerEntry>>? _dashboardAnswersCache;
+  Set<String>? _dismissedAlertKeysCache;
 
   User? get currentUser => _client.auth.currentUser;
 
@@ -31,6 +47,7 @@ class SupabaseService {
     required String password,
   }) async {
     try {
+      _clearAllCaches();
       await _client.auth.signInWithPassword(
         email: usernameToEmail(username),
         password: password,
@@ -40,7 +57,57 @@ class SupabaseService {
     }
   }
 
-  Future<void> signOut() => _client.auth.signOut();
+  Future<void> signOut() async {
+    _clearAllCaches();
+    await _client.auth.signOut();
+  }
+
+  bool _isFresh(DateTime savedAt, {Duration ttl = _defaultCacheTtl}) {
+    return DateTime.now().difference(savedAt) < ttl;
+  }
+
+  void _invalidateUserCaches() {
+    _allUsersCache = null;
+    _employeesOnlyCache = null;
+  }
+
+  void _invalidateAssignmentCaches({
+    String? assignmentId,
+    String? employeeId,
+    bool clearAllEmployeeAssignments = false,
+  }) {
+    _allAssignmentsCache = null;
+    _alertsCache = null;
+    _dashboardAnswersCache = null;
+
+    if (clearAllEmployeeAssignments) {
+      _employeeAssignmentsCache.clear();
+    } else if (employeeId != null) {
+      _employeeAssignmentsCache.remove(employeeId);
+    }
+
+    if (assignmentId != null) {
+      _assignmentQuestionsCache.remove(assignmentId);
+      _answersByAssignmentAndEmployeeCache.removeWhere(
+        (key, _) => key.startsWith('$assignmentId|'),
+      );
+    } else if (clearAllEmployeeAssignments) {
+      _assignmentQuestionsCache.clear();
+      _answersByAssignmentAndEmployeeCache.clear();
+    }
+  }
+
+  void _clearAllCaches() {
+    _allUsersCache = null;
+    _employeesOnlyCache = null;
+    _allAssignmentsCache = null;
+    _alertsCache = null;
+    _dashboardAnswersCache = null;
+    _dismissedAlertKeysCache = null;
+    _employeeAssignmentsCache.clear();
+    _assignmentQuestionsCache.clear();
+    _answersByAssignmentAndEmployeeCache.clear();
+  }
 
   Future<Profile?> fetchCurrentProfile() async {
     final user = currentUser;
@@ -63,32 +130,46 @@ class SupabaseService {
     }
   }
 
-  Future<List<Profile>> fetchAllUsers() async {
+  Future<List<Profile>> fetchAllUsers({bool forceRefresh = false}) async {
+    final cached = _allUsersCache;
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
       final rows = await _client
           .from('profiles')
           .select()
           .order('full_name', ascending: true);
-      return (rows as List)
+      final result = (rows as List)
           .cast<Map<String, dynamic>>()
           .map(Profile.fromMap)
           .toList();
+      _allUsersCache = _TimedValue(result);
+      return result;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
-  Future<List<Profile>> fetchEmployeesOnly() async {
+  Future<List<Profile>> fetchEmployeesOnly({bool forceRefresh = false}) async {
+    final cached = _employeesOnlyCache;
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
       final rows = await _client
           .from('profiles')
           .select()
           .eq('role', 'employee')
           .order('full_name', ascending: true);
-      return (rows as List)
+      final result = (rows as List)
           .cast<Map<String, dynamic>>()
           .map(Profile.fromMap)
           .toList();
+      _employeesOnlyCache = _TimedValue(result);
+      return result;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
@@ -123,6 +204,8 @@ class SupabaseService {
             : 'Failed to create user.';
         throw AppException(message);
       }
+      _invalidateUserCaches();
+      _invalidateAssignmentCaches(clearAllEmployeeAssignments: true);
     } on FunctionException catch (error) {
       throw AppException(error.details?.toString() ?? error.toString());
     }
@@ -150,6 +233,8 @@ class SupabaseService {
             : 'Failed to reset password.';
         throw AppException(message);
       }
+      _invalidateUserCaches();
+      _invalidateAssignmentCaches(clearAllEmployeeAssignments: true);
     } on FunctionException catch (error) {
       throw AppException(error.details?.toString() ?? error.toString());
     }
@@ -174,6 +259,8 @@ class SupabaseService {
             : 'Failed to delete user.';
         throw AppException(message);
       }
+      _invalidateUserCaches();
+      _invalidateAssignmentCaches(clearAllEmployeeAssignments: true);
     } on FunctionException catch (error) {
       throw AppException(error.details?.toString() ?? error.toString());
     }
@@ -216,7 +303,14 @@ class SupabaseService {
     }
   }
 
-  Future<List<TaskAssignment>> fetchAllAssignments() async {
+  Future<List<TaskAssignment>> fetchAllAssignments({
+    bool forceRefresh = false,
+  }) async {
+    final cached = _allAssignmentsCache;
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
       final rows = await _client
           .from('task_assignments')
@@ -225,19 +319,28 @@ class SupabaseService {
           )
           .order('expected_at', ascending: true);
 
-      return (rows as List)
+      final result = (rows as List)
           .cast<Map<String, dynamic>>()
           .map(TaskAssignment.fromMap)
           .toList();
+      _allAssignmentsCache = _TimedValue(result);
+      return result;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
-  Future<List<TaskAssignment>> fetchAssignmentsForCurrentEmployee() async {
+  Future<List<TaskAssignment>> fetchAssignmentsForCurrentEmployee({
+    bool forceRefresh = false,
+  }) async {
     final user = currentUser;
     if (user == null) {
       return [];
+    }
+
+    final cached = _employeeAssignmentsCache[user.id];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
     }
 
     try {
@@ -249,18 +352,26 @@ class SupabaseService {
           .eq('employee_id', user.id)
           .order('expected_at', ascending: true);
 
-      return (rows as List)
+      final result = (rows as List)
           .cast<Map<String, dynamic>>()
           .map(TaskAssignment.fromMap)
           .toList();
+      _employeeAssignmentsCache[user.id] = _TimedValue(result);
+      return result;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
   Future<List<AssignmentQuestion>> fetchAssignmentQuestions(
-    String assignmentId,
-  ) async {
+    String assignmentId, {
+    bool forceRefresh = false,
+  }) async {
+    final cached = _assignmentQuestionsCache[assignmentId];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
       final rows = await _client
           .from('assignment_questions')
@@ -268,21 +379,30 @@ class SupabaseService {
           .eq('assignment_id', assignmentId)
           .order('sort_order', ascending: true);
 
-      return (rows as List)
+      final result = (rows as List)
           .cast<Map<String, dynamic>>()
           .map(AssignmentQuestion.fromMap)
           .toList();
+      _assignmentQuestionsCache[assignmentId] = _TimedValue(result);
+      return result;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
   Future<Map<String, QuestionAnswer>> fetchAnswersForAssignment(
-    String assignmentId,
-  ) async {
+    String assignmentId, {
+    bool forceRefresh = false,
+  }) async {
     final user = currentUser;
     if (user == null) {
       return const {};
+    }
+
+    final cacheKey = '$assignmentId|${user.id}';
+    final cached = _answersByAssignmentAndEmployeeCache[cacheKey];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
     }
 
     try {
@@ -297,6 +417,7 @@ class SupabaseService {
         final answer = QuestionAnswer.fromMap(entry);
         map[answer.questionId] = answer;
       }
+      _answersByAssignmentAndEmployeeCache[cacheKey] = _TimedValue(map);
       return map;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
@@ -306,7 +427,14 @@ class SupabaseService {
   Future<Map<String, QuestionAnswer>> fetchAnswersForAdminReview({
     required String assignmentId,
     required String employeeId,
+    bool forceRefresh = false,
   }) async {
+    final cacheKey = '$assignmentId|$employeeId';
+    final cached = _answersByAssignmentAndEmployeeCache[cacheKey];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
       final rows = await _client
           .from('question_answers')
@@ -319,6 +447,7 @@ class SupabaseService {
         final answer = QuestionAnswer.fromMap(entry);
         map[answer.questionId] = answer;
       }
+      _answersByAssignmentAndEmployeeCache[cacheKey] = _TimedValue(map);
       return map;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
@@ -404,6 +533,11 @@ class SupabaseService {
       if (questionsPayload.isNotEmpty) {
         await _client.from('assignment_questions').insert(questionsPayload);
       }
+      _invalidateAssignmentCaches(
+        assignmentId: id,
+        employeeId: draft.employeeId,
+        clearAllEmployeeAssignments: true,
+      );
     } on PostgrestException catch (error) {
       if (_isShowAtColumnMissing(error.message)) {
         throw const AppException(
@@ -457,6 +591,10 @@ class SupabaseService {
             'submitted_at': taskSubmittedAt,
           })
           .eq('id', assignmentId);
+      _invalidateAssignmentCaches(
+        assignmentId: assignmentId,
+        employeeId: user.id,
+      );
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
@@ -476,6 +614,10 @@ class SupabaseService {
           .from('task_assignments')
           .update(payload)
           .eq('id', assignmentId);
+      _invalidateAssignmentCaches(
+        assignmentId: assignmentId,
+        clearAllEmployeeAssignments: true,
+      );
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
@@ -484,13 +626,97 @@ class SupabaseService {
   Future<void> deleteAssignment({required String assignmentId}) async {
     try {
       await _client.from('task_assignments').delete().eq('id', assignmentId);
+      _invalidateAssignmentCaches(
+        assignmentId: assignmentId,
+        clearAllEmployeeAssignments: true,
+      );
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
-  Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts() async {
+  Future<List<DashboardAnswerEntry>> fetchDashboardAnswerEntries({
+    bool forceRefresh = false,
+  }) async {
+    final cached = _dashboardAnswersCache;
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
     try {
+      final assignmentRows = await _client
+          .from('task_assignments')
+          .select(
+            '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
+          )
+          .order('expected_at', ascending: false);
+
+      final questionRows = await _client
+          .from('assignment_questions')
+          .select()
+          .order('sort_order', ascending: true);
+
+      final answerRows = await _client
+          .from('question_answers')
+          .select()
+          .order('answered_at', ascending: false);
+
+      final assignmentsById = <String, TaskAssignment>{};
+      for (final row in (assignmentRows as List).cast<Map<String, dynamic>>()) {
+        final assignment = TaskAssignment.fromMap(row);
+        assignmentsById[assignment.id] = assignment;
+      }
+
+      final questionsById = <String, AssignmentQuestion>{};
+      for (final row in (questionRows as List).cast<Map<String, dynamic>>()) {
+        final question = AssignmentQuestion.fromMap(row);
+        questionsById[question.id] = question;
+      }
+
+      final entries = <DashboardAnswerEntry>[];
+      for (final row in (answerRows as List).cast<Map<String, dynamic>>()) {
+        final assignmentId = row['assignment_id'] as String?;
+        final questionId = row['question_id'] as String?;
+        if (assignmentId == null || questionId == null) {
+          continue;
+        }
+
+        final assignment = assignmentsById[assignmentId];
+        final question = questionsById[questionId];
+        if (assignment == null || question == null) {
+          continue;
+        }
+
+        final answer = QuestionAnswer.fromMap(row);
+        entries.add(
+          DashboardAnswerEntry(
+            assignment: assignment,
+            question: question,
+            answer: answer,
+          ),
+        );
+      }
+
+      entries.sort(
+        (a, b) => b.answer.answeredAt.compareTo(a.answer.answeredAt),
+      );
+      _dashboardAnswersCache = _TimedValue(entries);
+      return entries;
+    } on PostgrestException catch (error) {
+      throw AppException(error.message);
+    }
+  }
+
+  Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts({
+    bool forceRefresh = false,
+  }) async {
+    final cached = _alertsCache;
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
+    try {
+      final dismissedKeys = await _loadDismissedAlertKeys();
       final assignmentRows = await _client
           .from('task_assignments')
           .select(
@@ -536,6 +762,10 @@ class SupabaseService {
         if (!_matchesUnwantedAnswer(answer.answerText, unwantedAnswer)) {
           continue;
         }
+        final alertKey = _buildAlertKey(answer);
+        if (dismissedKeys.contains(alertKey)) {
+          continue;
+        }
 
         final assignmentId = row['assignment_id'] as String?;
         if (assignmentId == null) {
@@ -548,6 +778,7 @@ class SupabaseService {
 
         alerts.add(
           FlaggedTaskAlert(
+            alertKey: alertKey,
             assignment: assignment,
             question: question,
             answerText: answer.answerText.trim(),
@@ -558,15 +789,31 @@ class SupabaseService {
       }
 
       alerts.sort((a, b) => b.answeredAt.compareTo(a.answeredAt));
+      _alertsCache = _TimedValue(alerts);
       return alerts;
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
   }
 
-  Future<int> fetchFlaggedTaskAlertCount() async {
-    final alerts = await fetchFlaggedTaskAlerts();
+  Future<int> fetchFlaggedTaskAlertCount({bool forceRefresh = false}) async {
+    final alerts = await fetchFlaggedTaskAlerts(forceRefresh: forceRefresh);
     return alerts.length;
+  }
+
+  Future<void> ignoreFlaggedTaskAlert({required String alertKey}) async {
+    final normalized = alertKey.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    final keys = Set<String>.from(await _loadDismissedAlertKeys())
+      ..add(normalized);
+    await _saveDismissedAlertKeys(keys);
+    _alertsCache = null;
+  }
+
+  Future<void> deleteFlaggedTaskAlert({required String alertKey}) async {
+    await ignoreFlaggedTaskAlert(alertKey: alertKey);
   }
 
   bool _matchesUnwantedAnswer(String answerText, String unwantedAnswer) {
@@ -574,9 +821,43 @@ class SupabaseService {
         unwantedAnswer.trim().toLowerCase();
   }
 
+  String _buildAlertKey(QuestionAnswer answer) {
+    return '${answer.id}|${answer.answeredAt.toUtc().toIso8601String()}';
+  }
+
+  Future<Set<String>> _loadDismissedAlertKeys() async {
+    final cached = _dismissedAlertKeysCache;
+    if (cached != null) {
+      return cached;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final values =
+        prefs.getStringList(_dismissedAlertKeysStorageKey) ?? const [];
+    final keys = values
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    _dismissedAlertKeysCache = keys;
+    return keys;
+  }
+
+  Future<void> _saveDismissedAlertKeys(Set<String> keys) async {
+    _dismissedAlertKeysCache = keys;
+    final sorted = keys.toList()..sort();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_dismissedAlertKeysStorageKey, sorted);
+  }
+
   bool _isShowAtColumnMissing(String message) {
     final lower = message.toLowerCase();
     return lower.contains('show_at') &&
         (lower.contains('column') || lower.contains('schema cache'));
   }
+}
+
+class _TimedValue<T> {
+  _TimedValue(this.value) : savedAt = DateTime.now();
+
+  final T value;
+  final DateTime savedAt;
 }

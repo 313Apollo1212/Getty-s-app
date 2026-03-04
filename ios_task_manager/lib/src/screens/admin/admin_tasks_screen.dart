@@ -21,10 +21,10 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
   final Set<String> _expandedEmployees = <String>{};
 
   static const _statusColors = <TaskStatus, Color>{
-    TaskStatus.pending: Color(0xFFF0F3F8),
-    TaskStatus.submitted: Color(0xFFDCEBFB),
+    TaskStatus.pending: Color(0xFFF1F4EA),
+    TaskStatus.submitted: Color(0xFFD7EAB8),
     TaskStatus.revisionRequested: Color(0xFFFFE3E0),
-    TaskStatus.approved: Color(0xFFDDF3E5),
+    TaskStatus.approved: Color(0xFFDFEFD0),
   };
 
   @override
@@ -35,7 +35,9 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
 
   Future<void> _reload() async {
     setState(() {
-      _assignmentsFuture = widget.service.fetchAllAssignments();
+      _assignmentsFuture = widget.service.fetchAllAssignments(
+        forceRefresh: true,
+      );
     });
   }
 
@@ -134,7 +136,7 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FBFF),
+          color: const Color(0xFFF4F8EC),
           borderRadius: BorderRadius.circular(14),
         ),
         child: LayoutBuilder(
@@ -206,7 +208,7 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                     task.status.label,
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF1C2A38),
+                      color: Color(0xFF121A0F),
                     ),
                   ),
                 ),
@@ -308,39 +310,106 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(14),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.checklist_rtl_rounded,
-                                  size: 16,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final compact = constraints.maxWidth < 620;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Task Management',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Create assignments and review by employee.',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                label: Text('Tasks ${assignments.length}'),
+                                if (!compact) ...[
+                                  const SizedBox(width: 12),
+                                  FilledButton.icon(
+                                    onPressed: () => _openEditor(),
+                                    icon: const Icon(Icons.add_task),
+                                    label: const Text('Create Task'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            if (compact)
+                              FilledButton.icon(
+                                onPressed: () => _openEditor(),
+                                icon: const Icon(Icons.add_task),
+                                label: const Text('Create Task'),
                               ),
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.people_outline_rounded,
-                                  size: 16,
-                                ),
-                                label: Text(
-                                  'Employees ${groupedEntries.length}',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        FilledButton.icon(
-                          onPressed: () => _openEditor(),
-                          icon: const Icon(Icons.add_task),
-                          label: const Text('Create Task'),
-                        ),
-                      ],
+                            if (compact) const SizedBox(height: 10),
+                            LayoutBuilder(
+                              builder: (context, inner) {
+                                final statCompact = inner.maxWidth < 420;
+                                if (statCompact) {
+                                  return Column(
+                                    children: [
+                                      _TaskSummaryTile(
+                                        icon: Icons.checklist_rtl_rounded,
+                                        label: 'Total Tasks',
+                                        value: '${assignments.length}',
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _TaskSummaryTile(
+                                        icon: Icons.people_outline_rounded,
+                                        label: 'Employees',
+                                        value: '${groupedEntries.length}',
+                                      ),
+                                    ],
+                                  );
+                                }
+                                return Row(
+                                  children: [
+                                    Expanded(
+                                      child: _TaskSummaryTile(
+                                        icon: Icons.checklist_rtl_rounded,
+                                        label: 'Total Tasks',
+                                        value: '${assignments.length}',
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: _TaskSummaryTile(
+                                        icon: Icons.people_outline_rounded,
+                                        label: 'Employees',
+                                        value: '${groupedEntries.length}',
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tap any user below to expand their tasks.',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -422,6 +491,53 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
 }
 
 enum _TaskMenuAction { edit, delete }
+
+class _TaskSummaryTile extends StatelessWidget {
+  const _TaskSummaryTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8EC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD6E2C9)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF2A3D1D)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _MetaText extends StatelessWidget {
   const _MetaText({required this.icon, required this.text});

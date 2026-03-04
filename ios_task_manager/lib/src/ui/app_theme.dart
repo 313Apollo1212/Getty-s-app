@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 const appPagePadding = EdgeInsets.fromLTRB(16, 14, 16, 24);
 
 ThemeData buildAppTheme() {
-  const primary = Color(0xFF1F567D);
-  const secondary = Color(0xFF5E7389);
+  const primary = Color(0xFF4E8F1F);
+  const secondary = Color(0xFF1A2214);
   const surface = Color(0xFFFFFFFF);
-  const pageBackground = Color(0xFFF2F6FB);
-  const text = Color(0xFF1C2A38);
-  const outline = Color(0xFFADB9C6);
-  const outlineSoft = Color(0xFFD8E0EA);
+  const pageBackground = Color(0xFF86C040);
+  const text = Color(0xFF121A0F);
+  const outline = Color(0xFFAAB79A);
+  const outlineSoft = Color(0xFFD6E2C9);
 
   final colorScheme =
       ColorScheme.fromSeed(
@@ -18,11 +18,11 @@ ThemeData buildAppTheme() {
       ).copyWith(
         primary: primary,
         onPrimary: Colors.white,
-        primaryContainer: const Color(0xFFDCE9F7),
+        primaryContainer: const Color(0xFFA7D36C),
         onPrimaryContainer: text,
         secondary: secondary,
         onSecondary: Colors.white,
-        secondaryContainer: const Color(0xFFE4ECF6),
+        secondaryContainer: const Color(0xFFE7F0D8),
         onSecondaryContainer: text,
         surface: surface,
         onSurface: text,
@@ -51,13 +51,13 @@ ThemeData buildAppTheme() {
       bodyLarge: base.textTheme.bodyLarge?.copyWith(color: text),
       bodyMedium: base.textTheme.bodyMedium?.copyWith(color: text),
       bodySmall: base.textTheme.bodySmall?.copyWith(
-        color: const Color(0xFF5A6A79),
+        color: const Color(0xFF44513A),
       ),
     ),
     appBarTheme: AppBarTheme(
       elevation: 0,
       centerTitle: false,
-      backgroundColor: Colors.white.withValues(alpha: 0.92),
+      backgroundColor: Colors.white.withValues(alpha: 0.94),
       foregroundColor: text,
       surfaceTintColor: Colors.transparent,
       titleTextStyle: base.textTheme.titleLarge?.copyWith(
@@ -70,7 +70,7 @@ ThemeData buildAppTheme() {
       elevation: 0,
       margin: EdgeInsets.zero,
       surfaceTintColor: Colors.transparent,
-      shadowColor: const Color(0x1A22405B),
+      shadowColor: const Color(0x1A1A2312),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: const BorderSide(color: outlineSoft),
@@ -78,10 +78,10 @@ ThemeData buildAppTheme() {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: const Color(0xFFF7FAFE),
+      fillColor: const Color(0xFFF7FBF0),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      labelStyle: const TextStyle(color: Color(0xFF556676)),
-      hintStyle: const TextStyle(color: Color(0xFF7A8A99)),
+      labelStyle: const TextStyle(color: Color(0xFF44513A)),
+      hintStyle: const TextStyle(color: Color(0xFF617256)),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: outlineSoft),
@@ -106,9 +106,9 @@ ThemeData buildAppTheme() {
     chipTheme: base.chipTheme.copyWith(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       side: const BorderSide(color: outlineSoft),
-      backgroundColor: const Color(0xFFF0F5FB),
-      selectedColor: const Color(0xFFDCE9F7),
-      secondarySelectedColor: const Color(0xFFDCE9F7),
+      backgroundColor: const Color(0xFFEFF6E2),
+      selectedColor: const Color(0xFFD7EAB8),
+      secondarySelectedColor: const Color(0xFFD7EAB8),
       checkmarkColor: text,
       labelStyle: const TextStyle(fontWeight: FontWeight.w600, color: text),
       secondaryLabelStyle: const TextStyle(
@@ -118,23 +118,34 @@ ThemeData buildAppTheme() {
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: Colors.white,
-      indicatorColor: const Color(0xFFDCE9F7),
+      indicatorColor: const Color(0xFFD7EAB8),
       labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>((states) {
         if (states.contains(WidgetState.selected)) {
-          return const TextStyle(fontWeight: FontWeight.w700, color: primary);
+          return const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: secondary,
+            fontSize: 12,
+            height: 0.95,
+          );
         }
-        return const TextStyle(fontWeight: FontWeight.w600);
+        return const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          height: 0.95,
+        );
       }),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: primary,
+        foregroundColor: secondary,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: const BorderSide(color: outline),
@@ -142,7 +153,7 @@ ThemeData buildAppTheme() {
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: primary,
+        foregroundColor: secondary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     ),
@@ -158,7 +169,7 @@ ThemeData buildAppTheme() {
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: const Color(0xFF22384F),
+      backgroundColor: const Color(0xFF11180D),
       contentTextStyle: const TextStyle(color: Colors.white),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
@@ -177,7 +188,7 @@ class AppBackground extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFF9FCFF), Color(0xFFEDF3FA)],
+          colors: [Color(0xFF9BCF55), Color(0xFF74B833)],
         ),
       ),
       child: child,

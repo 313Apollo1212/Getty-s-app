@@ -45,7 +45,9 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
   Future<void> _reload() async {
     setState(() {
-      _tasksFuture = widget.service.fetchAssignmentsForCurrentEmployee();
+      _tasksFuture = widget.service.fetchAssignmentsForCurrentEmployee(
+        forceRefresh: true,
+      );
     });
   }
 
@@ -97,11 +99,6 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             onPressed: _openProfile,
             tooltip: 'Profile',
             icon: const Icon(Icons.person_outline),
-          ),
-          IconButton(
-            onPressed: widget.service.signOut,
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Sign Out',
           ),
         ],
       ),

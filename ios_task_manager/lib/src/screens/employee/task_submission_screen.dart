@@ -51,12 +51,12 @@ class _TaskSubmissionScreenState extends State<TaskSubmissionScreen> {
   Future<void> _load() async {
     setState(() => _isLoading = true);
     try {
-      final questions = await widget.service.fetchAssignmentQuestions(
-        widget.assignment.id,
-      );
-      final answers = await widget.service.fetchAnswersForAssignment(
-        widget.assignment.id,
-      );
+      final results = await Future.wait<dynamic>([
+        widget.service.fetchAssignmentQuestions(widget.assignment.id),
+        widget.service.fetchAnswersForAssignment(widget.assignment.id),
+      ]);
+      final questions = results[0] as List<AssignmentQuestion>;
+      final answers = results[1] as Map<String, QuestionAnswer>;
 
       if (!mounted) {
         return;
