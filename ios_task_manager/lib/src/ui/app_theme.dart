@@ -119,19 +119,20 @@ ThemeData buildAppTheme() {
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: Colors.white,
       indicatorColor: const Color(0xFFD7EAB8),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>((states) {
         if (states.contains(WidgetState.selected)) {
           return const TextStyle(
             fontWeight: FontWeight.w700,
             color: secondary,
             fontSize: 12,
-            height: 0.95,
+            height: 1.0,
           );
         }
         return const TextStyle(
           fontWeight: FontWeight.w600,
           fontSize: 12,
-          height: 0.95,
+          height: 1.0,
         );
       }),
     ),

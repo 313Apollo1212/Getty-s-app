@@ -1,0 +1,167 @@
+- generic [active] [ref=e1]:
+  - text:  
+  - alert [ref=e2]:
+    - generic [ref=e5]: FRESH-BAKED, HANDMADE COOKIES DELIVERED ANYWHERE IN THE US!
+  - generic [ref=e6]:
+    - banner [ref=e7]:
+      - link [ref=e9] [cursor=pointer]:
+        - /url: https://carolscookies.com/
+        - img [ref=e10]
+      - generic [ref=e12]:
+        - navigation [ref=e13]:
+          - list [ref=e14]:
+            - listitem [ref=e15]:
+              - link "Order Cookies" [ref=e16] [cursor=pointer]:
+                - /url: https://carolscookies.com/order-cookies/
+            - listitem [ref=e17]:
+              - link "Flavors" [ref=e18] [cursor=pointer]:
+                - /url: https://carolscookies.com/flavors/
+            - listitem [ref=e19]:
+              - link "Party Favors" [ref=e20] [cursor=pointer]:
+                - /url: https://carolscookies.com/party-favors/
+            - listitem [ref=e21]:
+              - link "Corporate Gifts" [ref=e22] [cursor=pointer]:
+                - /url: https://carolscookies.com/corporate-gifts/
+            - listitem [ref=e23]:
+              - link "Carol’s Story" [ref=e24] [cursor=pointer]:
+                - /url: https://carolscookies.com/carols-story/
+                - text: Carol’s Story
+                - img [ref=e25]
+            - listitem [ref=e27]:
+              - link "Contact" [ref=e28] [cursor=pointer]:
+                - /url: https://carolscookies.com/contact-us/
+        - text:     
+      - generic [ref=e29]:
+        - button "Search" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]: 
+        - link [ref=e33] [cursor=pointer]:
+          - /url: https://carolscookies.com/cart/
+          - img [ref=e34]
+        - link [ref=e36] [cursor=pointer]:
+          - /url: https://carolscookies.com/my-account/
+          - img [ref=e37]
+    - main [ref=e39]:
+      - img "A tall stack of giant chocolate chip cookies—order these rich, bakery-style treats today for delivery to your doorstep." [ref=e49]
+      - figure [ref=e52]:
+        - img "Two freshly baked oatmeal raisin cookies on parchment paper, with oats, eggs, and butter in the background—order these homemade treats online for delivery." [ref=e53]
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - heading "Why We Love Carol's" [level=2] [ref=e58]
+          - link "See all" [ref=e59] [cursor=pointer]:
+            - /url: https://carolscookies.com/love-letters/
+            - text: See all
+            - img [ref=e60]
+        - generic [ref=e62]:
+          - generic [ref=e64]:
+            - heading "Jordan O." [level=4] [ref=e65]
+            - generic [ref=e66]: Paso Robles, CA
+            - generic [ref=e68]:
+              - heading "\"Love at First Bite!\"" [level=3] [ref=e69]
+              - text: Your peanut butter chocolate cookie is the most delicious thing I’ve ever tasted. My first bite was true love!
+          - generic [ref=e71]:
+            - heading "Alyx G." [level=4] [ref=e72]
+            - generic [ref=e73]: Nashville, TN
+            - generic [ref=e75]:
+              - heading "“Clients Rave Every Year”" [level=3] [ref=e76]
+              - text: We sent your cookies again for New Year’s gifts and got even better feedback than last year. You make us look so good!
+          - generic [ref=e78]:
+            - heading "Beth and Jeff D." [level=4] [ref=e79]
+            - generic [ref=e80]: Oswego, IL
+            - generic [ref=e82]:
+              - heading "“Wedding Guests Couldn’t Get Enough”" [level=3] [ref=e83]
+              - text: Your cookies were a hit at our wedding — not a single one was left behind! Thank you for making our day even sweeter.
+      - generic [ref=e85]:
+        - generic [ref=e87]:
+          - heading "Care & Storage for Carol’s Cookies." [level=2] [ref=e88]
+          - link "Learn about cookie care & storage" [ref=e89] [cursor=pointer]:
+            - /url: https://carolscookies.com/care-storage/
+            - text: Learn about cookie care & storage
+            - img [ref=e90]
+        - generic [ref=e93]:
+          - heading "Creative ways to use Carol’s Cookies in a recipe." [level=2] [ref=e94]
+          - link "Browse handmade cookie recipes" [ref=e95] [cursor=pointer]:
+            - /url: https://carolscookies.com/blog/category/recipes/
+            - text: Browse handmade cookie recipes
+            - img [ref=e96]
+    - contentinfo [ref=e98]:
+      - generic [ref=e99]:
+        - generic [ref=e100]:
+          - heading "Get the latest updates & promotions" [level=2] [ref=e101]
+          - generic [ref=e103]:
+            - generic [ref=e104]:
+              - paragraph [ref=e105]:
+                - generic [ref=e107]: Email (required) *
+                - textbox "Email (required) *" [ref=e108]:
+                  - /placeholder: Enter an email address...
+              - paragraph [ref=e109]:
+                - generic [ref=e110]:
+                  - checkbox "Yes, I would like to receive emails from Carol's Cookies. (You can unsubscribe anytime)" [ref=e111]
+                  - text: Yes, I would like to receive emails from Carol's Cookies. (You can unsubscribe anytime)
+              - paragraph [ref=e112]:
+                - button "Sign up" [ref=e113] [cursor=pointer]
+              - generic [ref=e114]:
+                - text: Constant Contact Use. Please leave this field blank.
+                - textbox "Constant Contact Use. Please leave this field blank. Constant Contact Use. Please leave this field blank." [ref=e115]
+            - generic [ref=e116]:
+              - separator [ref=e117]
+              - generic [ref=e118]:
+                - text: "By submitting this form, you are consenting to receive marketing emails from: Carol's Cookies, 3184 MacArthur Blvd, Northbrook, IL, 60062, http://www.carolscookies.com. You can revoke your consent to receive emails at any time by using the SafeUnsubscribe® link, found at the bottom of every email."
+                - link "Emails are serviced by Constant Contact, opens a new window" [ref=e119] [cursor=pointer]:
+                  - /url: https://www.constantcontact.com/legal/about-constant-contact
+                  - text: Emails are serviced by Constant Contact
+          - generic [ref=e120]:
+            - heading "Stay in touch" [level=2] [ref=e122]
+            - generic [ref=e123]:
+              - link [ref=e124] [cursor=pointer]:
+                - /url: https://www.facebook.com/CarolsCookies/
+                - img [ref=e125]: 
+              - link [ref=e127] [cursor=pointer]:
+                - /url: https://www.instagram.com/carolscookies/
+                - img [ref=e128]: 
+              - link [ref=e130] [cursor=pointer]:
+                - /url: https://www.linkedin.com/company/carol's-cookies/
+                - img [ref=e131]: 
+              - link [ref=e133] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@carols_cookies
+                - img [ref=e134]: 
+              - link [ref=e136] [cursor=pointer]:
+                - /url: https://www.youtube.com/channel/UCS5N6kJyQn8Goerh0SXboDQ
+                - img [ref=e137]: 
+        - list [ref=e142]:
+          - listitem [ref=e143]:
+            - link "FAQ" [ref=e144] [cursor=pointer]:
+              - /url: https://carolscookies.com/faq/
+          - listitem [ref=e145]:
+            - link "Shipping" [ref=e146] [cursor=pointer]:
+              - /url: https://carolscookies.com/shipping/
+          - listitem [ref=e147]:
+            - link "Blog" [ref=e148] [cursor=pointer]:
+              - /url: https://carolscookies.com/blog/
+          - listitem [ref=e149]:
+            - link "Video Gallery" [ref=e150] [cursor=pointer]:
+              - /url: https://carolscookies.com/blog/category/video/
+          - listitem [ref=e151]:
+            - link "Care & Storage" [ref=e152] [cursor=pointer]:
+              - /url: https://carolscookies.com/care-storage/
+          - listitem [ref=e153]:
+            - link "Where to buy" [ref=e154] [cursor=pointer]:
+              - /url: https://carolscookies.com/where-to-buy/
+          - listitem [ref=e155]:
+            - link "Privacy Policy" [ref=e156] [cursor=pointer]:
+              - /url: https://carolscookies.com/privacy-policy/
+          - listitem [ref=e157]:
+            - link "Terms of Use" [ref=e158] [cursor=pointer]:
+              - /url: https://carolscookies.com/terms-of-use/
+          - listitem [ref=e159]:
+            - link "Refund & Returns" [ref=e160] [cursor=pointer]:
+              - /url: https://carolscookies.com/refund-returns/
+          - listitem [ref=e161]:
+            - link "Contact" [ref=e162] [cursor=pointer]:
+              - /url: https://carolscookies.com/contact-us/
+        - paragraph [ref=e164]:
+          - text: © 2026
+          - link "Carol's Cookies, Inc." [ref=e165] [cursor=pointer]:
+            - /url: https://carolscookies.com/
+          - text: All rights reserved
+  - text: 
+  - status [ref=e166]

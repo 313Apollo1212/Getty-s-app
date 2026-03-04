@@ -644,22 +644,25 @@ class SupabaseService {
     }
 
     try {
-      final assignmentRows = await _client
-          .from('task_assignments')
-          .select(
-            '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
-          )
-          .order('expected_at', ascending: false);
-
-      final questionRows = await _client
-          .from('assignment_questions')
-          .select()
-          .order('sort_order', ascending: true);
-
-      final answerRows = await _client
-          .from('question_answers')
-          .select()
-          .order('answered_at', ascending: false);
+      final results = await Future.wait<dynamic>([
+        _client
+            .from('task_assignments')
+            .select(
+              '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
+            )
+            .order('expected_at', ascending: false),
+        _client
+            .from('assignment_questions')
+            .select()
+            .order('sort_order', ascending: true),
+        _client
+            .from('question_answers')
+            .select()
+            .order('answered_at', ascending: false),
+      ]);
+      final assignmentRows = results[0];
+      final questionRows = results[1];
+      final answerRows = results[2];
 
       final assignmentsById = <String, TaskAssignment>{};
       for (final row in (assignmentRows as List).cast<Map<String, dynamic>>()) {
@@ -716,19 +719,24 @@ class SupabaseService {
     }
 
     try {
-      final dismissedKeys = await _loadDismissedAlertKeys();
-      final assignmentRows = await _client
-          .from('task_assignments')
-          .select(
-            '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
-          )
-          .order('submitted_at', ascending: false);
-
-      final questionRows = await _client.from('assignment_questions').select();
-      final answerRows = await _client
-          .from('question_answers')
-          .select()
-          .order('answered_at', ascending: false);
+      final results = await Future.wait<dynamic>([
+        _loadDismissedAlertKeys(),
+        _client
+            .from('task_assignments')
+            .select(
+              '*, employee:profiles!task_assignments_employee_id_fkey(full_name, username)',
+            )
+            .order('submitted_at', ascending: false),
+        _client.from('assignment_questions').select(),
+        _client
+            .from('question_answers')
+            .select()
+            .order('answered_at', ascending: false),
+      ]);
+      final dismissedKeys = results[0] as Set<String>;
+      final assignmentRows = results[1];
+      final questionRows = results[2];
+      final answerRows = results[3];
 
       final assignmentsById = <String, TaskAssignment>{};
       for (final row in (assignmentRows as List).cast<Map<String, dynamic>>()) {

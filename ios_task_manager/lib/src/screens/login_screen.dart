@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _hidePassword = true;
 
   @override
   void dispose() {
@@ -87,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'Task Manager',
+                                'Growing',
                                 style: Theme.of(
                                   context,
                                 ).textTheme.headlineSmall,
@@ -117,9 +118,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _passwordController,
-                          obscureText: true,
-                          decoration: const InputDecoration(
+                          obscureText: _hidePassword,
+                          decoration: InputDecoration(
                             labelText: 'Password',
+                            suffixIcon: IconButton(
+                              onPressed: () {
+                                setState(() {
+                                  _hidePassword = !_hidePassword;
+                                });
+                              },
+                              icon: Icon(
+                                _hidePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                            ),
                           ),
                           onFieldSubmitted: (_) => _submit(),
                           validator: (value) {

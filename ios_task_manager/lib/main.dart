@@ -30,7 +30,7 @@ class TaskManagerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Task Manager',
+      title: 'Growing',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: _supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty

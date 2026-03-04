@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Neon Void Runner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hud-top">
+        <h1>Neon Void Runner</h1>
+        <div class="stat-row" aria-live="polite">
+          <span id="scoreText">Score: 0</span>
+          <span id="waveText">Wave: 1</span>
+          <span id="energyText">Energy: 100</span>
+        </div>
+      </section>
+
+      <canvas id="game" width="1280" height="720" aria-label="Neon Void Runner game canvas"></canvas>
+
+      <section class="hud-bottom" id="messageBar">
+        WASD/Arrows move | Shift/B dash | Space pulse | P or Enter pause | R/Enter restart | F fullscreen
+      </section>
+
+      <section class="touch-controls" id="touchControls" aria-label="Touch controls">
+        <div class="touch-stick" id="stickPad"></div>
+        <div class="touch-actions">
+          <button id="pulseBtn" type="button">Pulse</button>
+          <button id="dashBtn" type="button">Dash</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>

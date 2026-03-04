@@ -62,108 +62,106 @@ class _AdminShellState extends State<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
-    final topInset = MediaQuery.paddingOf(context).top;
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final topInset = viewPadding.top;
+    const topBarHeight = 16.0;
     const bellHitBox = 34.0;
-    final bellTop = ((topInset - bellHitBox) / 2 + 10).clamp(0.0, 28.0);
-    const barHeight = 66.0;
-    const topHeaderHeight = 44.0;
+    const navHeight = 70.0;
     final barColor =
         Theme.of(context).navigationBarTheme.backgroundColor ??
         Theme.of(context).colorScheme.surface;
+    final borderColor = Theme.of(context).colorScheme.outlineVariant;
 
     return Scaffold(
       body: Column(
         children: [
           Container(
-            height: topInset + topHeaderHeight,
-            color: barColor,
-            child: Stack(
-              children: [
-                Positioned(
-                  top: bellTop,
-                  right: 26,
-                  child: IconButton(
-                    onPressed: _openAlerts,
-                    tooltip: 'Alerts',
-                    visualDensity: VisualDensity.compact,
-                    style: IconButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(bellHitBox, bellHitBox),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: Badge(
-                      isLabelVisible: _alertCount > 0,
-                      label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
-                      child: const Icon(
-                        Icons.notifications_none_rounded,
-                        color: Colors.black,
-                      ),
+            height: topInset + topBarHeight,
+            decoration: BoxDecoration(
+              color: barColor,
+              border: Border(bottom: BorderSide(color: borderColor)),
+            ),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Transform.translate(
+                offset: const Offset(-32, 16),
+                child: IconButton(
+                  onPressed: _openAlerts,
+                  tooltip: 'Alerts',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(bellHitBox, bellHitBox),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: Badge(
+                    isLabelVisible: _alertCount > 0,
+                    label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
+                    child: const Icon(
+                      Icons.notifications_rounded,
+                      color: Colors.black,
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
           Expanded(
-            child: IndexedStack(index: _index, children: _pages),
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              removeBottom: true,
+              child: IndexedStack(index: _index, children: _pages),
+            ),
           ),
         ],
       ),
-      bottomNavigationBar: SizedBox(
-        height: barHeight,
-        child: NavigationBar(
-          height: barHeight,
-          selectedIndex: _index,
-          onDestinationSelected: (value) async {
-            setState(() => _index = value);
-            await _loadAlertCount();
-          },
-          destinations: [
-            const NavigationDestination(
-              icon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.space_dashboard_outlined),
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: barColor,
+          border: Border(top: BorderSide(color: borderColor)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: navHeight,
+            child: Center(
+              child: FractionallySizedBox(
+                widthFactor: 0.9,
+                child: NavigationBar(
+                  backgroundColor: barColor,
+                  height: navHeight,
+                  selectedIndex: _index,
+                  onDestinationSelected: (value) async {
+                    setState(() => _index = value);
+                    await _loadAlertCount();
+                  },
+                  destinations: [
+                    const NavigationDestination(
+                      icon: Icon(Icons.space_dashboard_outlined),
+                      selectedIcon: Icon(Icons.space_dashboard),
+                      label: 'Dashboard',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.checklist_outlined),
+                      selectedIcon: Icon(Icons.checklist),
+                      label: 'Tasks',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.people_outline),
+                      selectedIcon: Icon(Icons.people),
+                      label: 'Users',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.person_outline),
+                      selectedIcon: Icon(Icons.person),
+                      label: 'Profile',
+                    ),
+                  ],
+                ),
               ),
-              selectedIcon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.space_dashboard),
-              ),
-              label: 'Dashboard',
             ),
-            const NavigationDestination(
-              icon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.checklist_outlined),
-              ),
-              selectedIcon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.checklist),
-              ),
-              label: 'Tasks',
-            ),
-            const NavigationDestination(
-              icon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.people_outline),
-              ),
-              selectedIcon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.people),
-              ),
-              label: 'Users',
-            ),
-            const NavigationDestination(
-              icon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.person_outline),
-              ),
-              selectedIcon: Padding(
-                padding: EdgeInsets.only(top: 9),
-                child: Icon(Icons.person),
-              ),
-              label: 'Profile',
-            ),
-          ],
+          ),
         ),
       ),
     );

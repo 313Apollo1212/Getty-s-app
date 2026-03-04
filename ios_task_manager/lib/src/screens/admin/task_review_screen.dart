@@ -142,6 +142,88 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
     );
   }
 
+  Widget _buildAnswerRow(
+    int index,
+    AssignmentQuestion question,
+    QuestionAnswer? answer,
+  ) {
+    final background = index.isEven
+        ? const Color(0xFFF4F8EC)
+        : Colors.transparent;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 560;
+
+        if (compact) {
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  question.prompt,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(child: _buildCompactAnswer(question, answer)),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Response Info',
+                      onPressed: () => _showAnswerInfo(answer),
+                      icon: const Icon(Icons.info_outline, size: 18),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Text(
+                  question.prompt,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 4,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _buildCompactAnswer(question, answer),
+                ),
+              ),
+              const SizedBox(width: 2),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Response Info',
+                onPressed: () => _showAnswerInfo(answer),
+                icon: const Icon(Icons.info_outline, size: 18),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showAnswerInfo(QuestionAnswer? answer) async {
     await showDialog<void>(
       context: context,
@@ -234,79 +316,45 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 6),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
+                  if (_questions.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          'No questions were configured for this task.',
+                        ),
                       ),
-                      child: Column(
-                        children: [
-                          for (
-                            var index = 0;
-                            index < _questions.length;
-                            index++
-                          ) ...[
-                            Builder(
-                              builder: (context) {
-                                final question = _questions[index];
-                                final answer = _answers[question.id];
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 8,
-                                    horizontal: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: index.isEven
-                                        ? const Color(0xFFF4F8EC)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Expanded(
-                                        flex: 5,
-                                        child: Text(
-                                          question.prompt,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        flex: 4,
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: _buildCompactAnswer(
-                                            question,
-                                            answer,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 2),
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        tooltip: 'Response Info',
-                                        onPressed: () =>
-                                            _showAnswerInfo(answer),
-                                        icon: const Icon(
-                                          Icons.info_outline,
-                                          size: 18,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
+                    )
+                  else
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        child: Column(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < _questions.length;
+                              index++
+                            ) ...[
+                              Builder(
+                                builder: (context) {
+                                  final question = _questions[index];
+                                  final answer = _answers[question.id];
+                                  return _buildAnswerRow(
+                                    index,
+                                    question,
+                                    answer,
+                                  );
+                                },
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
-                  ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
