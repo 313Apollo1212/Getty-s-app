@@ -32,14 +32,6 @@ String _weekdayLongLabel(int weekday) {
   };
 }
 
-String _formatClock(DateTime value) {
-  final local = value.toLocal();
-  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-  final minute = local.minute.toString().padLeft(2, '0');
-  final period = local.hour >= 12 ? 'PM' : 'AM';
-  return '$hour:$minute $period';
-}
-
 class EmployeeHomeScreen extends StatefulWidget {
   const EmployeeHomeScreen({
     super.key,
@@ -146,6 +138,78 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
   int _totalMinutesForDay(List<_PlannedTaskOccurrence> items) {
     return items.fold<int>(0, (sum, item) => sum + item.item.estimatedMinutes);
+  }
+
+  Color _priorityColor(int value) {
+    return switch (value) {
+      1 => const Color(0xFFD32F2F),
+      2 => const Color(0xFFF57C00),
+      3 => const Color(0xFFFBC02D),
+      4 => const Color(0xFF7CB342),
+      _ => const Color(0xFF2E7D32),
+    };
+  }
+
+  Color _priorityTextColor(int value) {
+    if (value >= 4) {
+      return Colors.white;
+    }
+    if (value == 3) {
+      return Colors.black;
+    }
+    return Colors.white;
+  }
+
+  String? _shiftSummary(_PlannedTaskOccurrence entry) {
+    final movedFrom = entry.movedFromWeekday;
+    if (movedFrom == null && entry.originalWeekday == entry.scheduledWeekday) {
+      return null;
+    }
+    return 'Shifted to ${weekdayShortLabel(entry.scheduledWeekday)} • original ${weekdayShortLabel(entry.originalWeekday)}';
+  }
+
+  String _statusLabel(_TaskProgressState state) {
+    if (!state.completed || state.latestLog == null) {
+      return 'Pending';
+    }
+    return switch (state.latestLog!.outcome) {
+      GeneratedTaskOutcome.done => 'Completed',
+      GeneratedTaskOutcome.notDone => 'Not completed',
+      GeneratedTaskOutcome.needsMoreTime => 'Needed more time',
+    };
+  }
+
+  Color? _statusBackgroundColor(_TaskProgressState state) {
+    if (!state.completed || state.latestLog == null) {
+      return null;
+    }
+    return switch (state.latestLog!.outcome) {
+      GeneratedTaskOutcome.done => const Color(0xFFEAF7EE),
+      GeneratedTaskOutcome.notDone => const Color(0xFFFDECEC),
+      GeneratedTaskOutcome.needsMoreTime => const Color(0xFFFFF3E0),
+    };
+  }
+
+  Color? _statusBorderColor(_TaskProgressState state) {
+    if (!state.completed || state.latestLog == null) {
+      return null;
+    }
+    return switch (state.latestLog!.outcome) {
+      GeneratedTaskOutcome.done => const Color(0xFF62B77A),
+      GeneratedTaskOutcome.notDone => const Color(0xFFE57373),
+      GeneratedTaskOutcome.needsMoreTime => const Color(0xFFFFB74D),
+    };
+  }
+
+  Color _statusChipColor(_TaskProgressState state) {
+    if (!state.completed || state.latestLog == null) {
+      return const Color(0xFFE8EFE8);
+    }
+    return switch (state.latestLog!.outcome) {
+      GeneratedTaskOutcome.done => const Color(0xFFD6F0DC),
+      GeneratedTaskOutcome.notDone => const Color(0xFFF8D7DA),
+      GeneratedTaskOutcome.needsMoreTime => const Color(0xFFFFE0B2),
+    };
   }
 
   Map<int, List<_PlannedTaskOccurrence>> _buildBalancedWeekSchedule(
@@ -272,19 +336,33 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             entry.item.priority == reassignment.priority &&
             entry.item.estimatedMinutes == reassignment.estimatedMinutes;
       });
-      if (matchIndex < 0) {
-        continue;
+      if (matchIndex >= 0) {
+        final moved = sourceList.removeAt(matchIndex);
+        adjusted[reassignment.targetWeekday]!.add(
+          _PlannedTaskOccurrence(
+            item: moved.item,
+            originalWeekday: moved.originalWeekday,
+            scheduledWeekday: reassignment.targetWeekday,
+            movedFromWeekday: reassignment.fromScheduledWeekday,
+          ),
+        );
+      } else {
+        adjusted[reassignment.targetWeekday]!.add(
+          _PlannedTaskOccurrence(
+            item: GeneratedTaskItem(
+              categoryTitle: reassignment.categoryTitle,
+              prompt: reassignment.prompt,
+              weekdays: <int>[reassignment.targetWeekday],
+              estimatedMinutes: reassignment.estimatedMinutes,
+              priority: reassignment.priority,
+              answeredAt: reassignment.createdAt,
+            ),
+            originalWeekday: reassignment.originalWeekday,
+            scheduledWeekday: reassignment.targetWeekday,
+            movedFromWeekday: reassignment.fromScheduledWeekday,
+          ),
+        );
       }
-
-      final moved = sourceList.removeAt(matchIndex);
-      adjusted[reassignment.targetWeekday]!.add(
-        _PlannedTaskOccurrence(
-          item: moved.item,
-          originalWeekday: moved.originalWeekday,
-          scheduledWeekday: reassignment.targetWeekday,
-          movedFromWeekday: reassignment.fromScheduledWeekday,
-        ),
-      );
     }
 
     for (var day = 1; day <= 7; day++) {
@@ -306,6 +384,49 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
     }
 
     return adjusted;
+  }
+
+  Future<DateTime> _findNextAvailableDateForExtraWork(
+    _EmployeeTaskPayload payload, {
+    required int extraMinutes,
+  }) async {
+    final today = _dateOnly(DateTime.now());
+    final weekCache = <String, List<GeneratedTaskReassignment>>{};
+    final base = _buildBalancedWeekSchedule(payload.generatedTasks);
+    final currentWeekStart = _startOfWeek(today);
+    final currentWeekKey = _dateOnly(currentWeekStart).toIso8601String();
+    weekCache[currentWeekKey] = payload.weekTaskReassignments;
+
+    for (var dayOffset = 1; dayOffset <= 56; dayOffset++) {
+      final candidateDate = today.add(Duration(days: dayOffset));
+      final candidateWeekStart = _startOfWeek(candidateDate);
+      final candidateWeekKey = _dateOnly(candidateWeekStart).toIso8601String();
+      final reassignments =
+          weekCache[candidateWeekKey] ??
+          await widget.service
+              .fetchCurrentEmployeeGeneratedTaskReassignmentsForWeek(
+                weekStartDate: candidateWeekStart,
+              );
+      weekCache[candidateWeekKey] = reassignments;
+
+      final schedule = _applyWeekReassignments(base, reassignments);
+      final dayItems =
+          schedule[candidateDate.weekday] ?? const <_PlannedTaskOccurrence>[];
+      final dayTotal = _totalMinutesForDay(dayItems);
+      if (dayTotal + extraMinutes <= _dailyCapacityMinutes) {
+        return candidateDate;
+      }
+    }
+
+    return today.add(const Duration(days: 1));
+  }
+
+  String _buildExtraTimePrompt(String prompt) {
+    const suffix = ' (Extra time)';
+    if (prompt.endsWith(suffix)) {
+      return prompt;
+    }
+    return '$prompt$suffix';
   }
 
   Future<void> _addPriorityFiveTasksFromFuture(
@@ -334,8 +455,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         payload.weekTaskReassignments,
       );
       final weekStart = _startOfWeek(DateTime.now());
-
-      final drafts = <GeneratedTaskReassignmentDraft>[];
+      GeneratedTaskReassignmentDraft? selected;
       for (var day = todayWeekday + 1; day <= DateTime.sunday; day++) {
         final dayEntries = schedule[day] ?? const <_PlannedTaskOccurrence>[];
         final dayDate = weekStart.add(Duration(days: day - 1));
@@ -349,21 +469,23 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
           if (state.completed || entry.item.priority != 5) {
             continue;
           }
-          drafts.add(
-            GeneratedTaskReassignmentDraft(
-              categoryTitle: entry.item.categoryTitle,
-              prompt: entry.item.prompt,
-              originalWeekday: entry.originalWeekday,
-              fromScheduledWeekday: day,
-              targetWeekday: todayWeekday,
-              priority: entry.item.priority,
-              estimatedMinutes: entry.item.estimatedMinutes,
-            ),
+          selected = GeneratedTaskReassignmentDraft(
+            categoryTitle: entry.item.categoryTitle,
+            prompt: entry.item.prompt,
+            originalWeekday: entry.originalWeekday,
+            fromScheduledWeekday: day,
+            targetWeekday: todayWeekday,
+            priority: entry.item.priority,
+            estimatedMinutes: entry.item.estimatedMinutes,
           );
+          break;
+        }
+        if (selected != null) {
+          break;
         }
       }
 
-      if (drafts.isEmpty) {
+      if (selected == null) {
         if (!mounted) {
           return;
         }
@@ -379,16 +501,14 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
       await widget.service.saveGeneratedTaskReassignments(
         weekStartDate: weekStart,
-        reassignments: drafts,
+        reassignments: <GeneratedTaskReassignmentDraft>[selected],
       );
 
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Moved ${drafts.length} Priority 5 tasks to today.'),
-        ),
+        const SnackBar(content: Text('Moved 1 Priority 5 task to today.')),
       );
       await _reload();
     } catch (error) {
@@ -513,10 +633,15 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   Future<void> _submitGeneratedTask(
     _PlannedTaskOccurrence entry,
     _TaskActionDraft draft,
+    _EmployeeTaskPayload payload,
   ) async {
     if (_isSavingGeneratedAction || draft.outcome == null) {
       return;
     }
+
+    final extraMinutes = draft.outcome == GeneratedTaskOutcome.needsMoreTime
+        ? _extraTimeMinuteSteps[draft.extraIndex.round()]
+        : null;
 
     setState(() => _isSavingGeneratedAction = true);
     try {
@@ -528,11 +653,32 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         priority: entry.item.priority,
         estimatedMinutes: entry.item.estimatedMinutes,
         outcome: draft.outcome!,
-        extraMinutes: draft.outcome == GeneratedTaskOutcome.needsMoreTime
-            ? _extraTimeMinuteSteps[draft.extraIndex.round()]
-            : null,
+        extraMinutes: extraMinutes,
         workDate: DateTime.now(),
       );
+
+      if (draft.outcome == GeneratedTaskOutcome.needsMoreTime &&
+          extraMinutes != null &&
+          extraMinutes > 0) {
+        final targetDate = await _findNextAvailableDateForExtraWork(
+          payload,
+          extraMinutes: extraMinutes,
+        );
+        await widget.service.saveGeneratedTaskReassignments(
+          weekStartDate: _startOfWeek(targetDate),
+          reassignments: <GeneratedTaskReassignmentDraft>[
+            GeneratedTaskReassignmentDraft(
+              categoryTitle: entry.item.categoryTitle,
+              prompt: _buildExtraTimePrompt(entry.item.prompt),
+              originalWeekday: entry.originalWeekday,
+              fromScheduledWeekday: entry.scheduledWeekday,
+              targetWeekday: targetDate.weekday,
+              priority: entry.item.priority,
+              estimatedMinutes: extraMinutes,
+            ),
+          ],
+        );
+      }
 
       if (!mounted) {
         return;
@@ -554,17 +700,31 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
     }
   }
 
+  Widget _buildPriorityBadge(int priority) {
+    final bg = _priorityColor(priority);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        'Priority $priority',
+        style: TextStyle(
+          color: _priorityTextColor(priority),
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCalendarTaskCard(_TaskProgressState state) {
     final entry = state.entry;
     final item = entry.item;
-    final movedFrom = entry.movedFromWeekday;
-    final shifted =
-        movedFrom != null || entry.originalWeekday != entry.scheduledWeekday;
-    final shiftLabel = movedFrom != null && movedFrom != entry.originalWeekday
-        ? 'shifted from ${weekdayShortLabel(movedFrom)} (original ${weekdayShortLabel(entry.originalWeekday)})'
-        : 'shifted from ${weekdayShortLabel(movedFrom ?? entry.originalWeekday)}';
-    final bgColor = state.completed ? const Color(0xFFEAF7EE) : null;
-    final borderColor = state.completed ? const Color(0xFF62B77A) : null;
+    final shiftSummary = _shiftSummary(entry);
+    final bgColor = _statusBackgroundColor(state);
+    final borderColor = _statusBorderColor(state);
     return Card(
       color: bgColor,
       shape: RoundedRectangleBorder(
@@ -572,75 +732,6 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         side: borderColor == null
             ? BorderSide.none
             : BorderSide(color: borderColor, width: 1.2),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        isThreeLine: true,
-        title: Text(
-          item.prompt,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              shifted
-                  ? '${item.categoryTitle} • ${formatDurationMinutes(item.estimatedMinutes)} • $shiftLabel'
-                  : '${item.categoryTitle} • ${formatDurationMinutes(item.estimatedMinutes)}',
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                Chip(label: Text('Priority ${item.priority}')),
-                Chip(
-                  label: Text(state.completed ? 'Completed' : 'Pending'),
-                  backgroundColor: state.completed
-                      ? const Color(0xFFD6F0DC)
-                      : null,
-                ),
-              ],
-            ),
-          ],
-        ),
-        trailing: state.completed
-            ? Text(
-                _formatClock(state.latestLog?.submittedAt ?? DateTime.now()),
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
-              )
-            : null,
-      ),
-    );
-  }
-
-  Widget _buildTasksExecutionCard(_TaskProgressState state) {
-    final entry = state.entry;
-    final item = entry.item;
-    final draft = _taskActionDrafts[state.key];
-    final selectedOutcome = draft?.outcome;
-    final movedFrom = entry.movedFromWeekday;
-    final shifted =
-        movedFrom != null || entry.originalWeekday != entry.scheduledWeekday;
-    final shiftLabel = movedFrom != null && movedFrom != entry.originalWeekday
-        ? 'shifted from ${weekdayShortLabel(movedFrom)} (original ${weekdayShortLabel(entry.originalWeekday)})'
-        : 'shifted from ${weekdayShortLabel(movedFrom ?? entry.originalWeekday)}';
-
-    final completedColor = state.completed ? const Color(0xFFEAF7EE) : null;
-    final completedBorder = state.completed ? const Color(0xFF62B77A) : null;
-
-    return Card(
-      color: completedColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: completedBorder == null
-            ? BorderSide.none
-            : BorderSide(color: completedBorder, width: 1.2),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -652,113 +743,189 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                 Expanded(
                   child: Text(
                     item.prompt,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
-                Chip(label: Text('Priority ${item.priority}')),
+                _buildPriorityBadge(item.priority),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
-              shifted
-                  ? '${item.categoryTitle} • $shiftLabel'
-                  : item.categoryTitle,
-              style: Theme.of(context).textTheme.titleMedium,
+              item.categoryTitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
             ),
+            const SizedBox(height: 4),
             Text(
-              'Estimated: ${formatDurationMinutes(item.estimatedMinutes)}',
-              style: Theme.of(context).textTheme.bodyMedium,
+              shiftSummary == null
+                  ? 'Estimated: ${formatDurationMinutes(item.estimatedMinutes)}'
+                  : 'Estimated: ${formatDurationMinutes(item.estimatedMinutes)} • $shiftSummary',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (state.completed) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Completed at ${formatDateTime(state.latestLog?.submittedAt ?? DateTime.now())}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1B5E20),
-                ),
-              ),
-            ] else ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _OutcomeButton(
-                      label: 'Completed',
-                      selected: selectedOutcome == GeneratedTaskOutcome.done,
-                      onPressed: () {
-                        _toggleOutcomeSelection(
-                          state.key,
-                          GeneratedTaskOutcome.done,
-                        );
-                      },
-                    ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
                   ),
+                  decoration: BoxDecoration(
+                    color: _statusChipColor(state),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    _statusLabel(state),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if (state.completed) ...[
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: _OutcomeButton(
-                      label: 'Not Completed',
-                      selected: selectedOutcome == GeneratedTaskOutcome.notDone,
-                      onPressed: () {
-                        _toggleOutcomeSelection(
-                          state.key,
-                          GeneratedTaskOutcome.notDone,
-                        );
-                      },
+                  Text(
+                    formatDateTime(
+                      state.latestLog?.submittedAt ?? DateTime.now(),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _OutcomeButton(
-                      label: 'Needs More Time',
-                      selected:
-                          selectedOutcome == GeneratedTaskOutcome.needsMoreTime,
-                      onPressed: () {
-                        _toggleOutcomeSelection(
-                          state.key,
-                          GeneratedTaskOutcome.needsMoreTime,
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              if (selectedOutcome == GeneratedTaskOutcome.needsMoreTime) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'More time needed: ${formatDurationMinutes(_extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0])}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Slider(
-                  value: draft?.extraIndex ?? 0,
-                  min: 0,
-                  max: (_extraTimeMinuteSteps.length - 1).toDouble(),
-                  divisions: _extraTimeMinuteSteps.length - 1,
-                  label: formatDurationMinutes(
-                    _extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0],
-                  ),
-                  onChanged: (value) => _updateExtraIndex(state.key, value),
-                ),
-              ],
-              if (selectedOutcome != null) ...[
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 46),
-                  ),
-                  onPressed: _isSavingGeneratedAction
-                      ? null
-                      : () => _submitGeneratedTask(entry, draft!),
-                  icon: const Icon(Icons.check),
-                  label: Text(
-                    _isSavingGeneratedAction ? 'Saving...' : 'Save and Next',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onPrimary,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTasksExecutionCard(
+    _TaskProgressState state,
+    _EmployeeTaskPayload payload,
+  ) {
+    final entry = state.entry;
+    final item = entry.item;
+    final draft = _taskActionDrafts[state.key];
+    final selectedOutcome = draft?.outcome;
+    final shiftSummary = _shiftSummary(entry);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    item.prompt,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                _buildPriorityBadge(item.priority),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              item.categoryTitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              shiftSummary == null
+                  ? 'Estimated: ${formatDurationMinutes(item.estimatedMinutes)}'
+                  : 'Estimated: ${formatDurationMinutes(item.estimatedMinutes)} • $shiftSummary',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _OutcomeButton(
+                    label: 'Completed',
+                    selected: selectedOutcome == GeneratedTaskOutcome.done,
+                    onPressed: () {
+                      _toggleOutcomeSelection(
+                        state.key,
+                        GeneratedTaskOutcome.done,
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _OutcomeButton(
+                    label: 'Not Completed',
+                    selected: selectedOutcome == GeneratedTaskOutcome.notDone,
+                    onPressed: () {
+                      _toggleOutcomeSelection(
+                        state.key,
+                        GeneratedTaskOutcome.notDone,
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _OutcomeButton(
+                    label: 'Needs More Time',
+                    selected:
+                        selectedOutcome == GeneratedTaskOutcome.needsMoreTime,
+                    onPressed: () {
+                      _toggleOutcomeSelection(
+                        state.key,
+                        GeneratedTaskOutcome.needsMoreTime,
+                      );
+                    },
+                  ),
                 ),
               ],
+            ),
+            if (selectedOutcome == GeneratedTaskOutcome.needsMoreTime) ...[
+              const SizedBox(height: 10),
+              Text(
+                'More time needed: ${formatDurationMinutes(_extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0])}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Slider(
+                value: draft?.extraIndex ?? 0,
+                min: 0,
+                max: (_extraTimeMinuteSteps.length - 1).toDouble(),
+                divisions: _extraTimeMinuteSteps.length - 1,
+                label: formatDurationMinutes(
+                  _extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0],
+                ),
+                onChanged: (value) => _updateExtraIndex(state.key, value),
+              ),
+            ],
+            if (selectedOutcome != null) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 46),
+                ),
+                onPressed: _isSavingGeneratedAction
+                    ? null
+                    : () => _submitGeneratedTask(entry, draft!, payload),
+                icon: const Icon(Icons.check),
+                label: Text(
+                  _isSavingGeneratedAction ? 'Saving...' : 'Save and Next',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ],
           ],
         ),
@@ -823,6 +990,9 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       generated,
       payload.todayTaskActionLogs,
     );
+    final pendingStates = progressStates
+        .where((state) => !state.completed)
+        .toList();
     final isAssessment = _taskBoardTab == _TaskBoardTab.assessment;
     final completedCount = progressStates
         .where((state) => state.completed)
@@ -858,9 +1028,9 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                   height: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Icon(Icons.swap_horiz_rounded),
+              : const Icon(Icons.add),
           label: Text(
-            _isAddingPriorityFiveTasks ? 'Adding...' : 'Add Priority 5 tasks',
+            _isAddingPriorityFiveTasks ? 'Adding...' : 'Add Priority 5 task',
           ),
         ),
       ],
@@ -884,7 +1054,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         }
       }
     } else {
-      if (progressStates.isEmpty) {
+      if (pendingStates.isEmpty) {
         children.add(
           Card(
             child: Padding(
@@ -897,8 +1067,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
           ),
         );
       } else {
-        for (final state in progressStates) {
-          children.add(_buildTasksExecutionCard(state));
+        for (final state in pendingStates) {
+          children.add(_buildTasksExecutionCard(state, payload));
           children.add(const SizedBox(height: 10));
         }
       }
