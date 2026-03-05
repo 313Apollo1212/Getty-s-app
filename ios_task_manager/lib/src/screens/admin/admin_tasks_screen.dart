@@ -41,12 +41,16 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
     });
   }
 
-  Future<void> _openEditor({TaskAssignment? assignment}) async {
+  Future<void> _openEditor({
+    TaskAssignment? assignment,
+    AssignmentKind creationKind = AssignmentKind.task,
+  }) async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => TaskEditorScreen(
           service: widget.service,
           existingAssignment: assignment,
+          creationKind: creationKind,
         ),
       ),
     );
@@ -54,6 +58,32 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
     if (changed == true && mounted) {
       await _reload();
     }
+  }
+
+  Widget _buildCreateButtons({required bool compact}) {
+    final taskButton = FilledButton.icon(
+      onPressed: () => _openEditor(creationKind: AssignmentKind.task),
+      icon: const Icon(Icons.add_task),
+      label: const Text('Create Task'),
+    );
+    final assessmentButton = FilledButton.tonalIcon(
+      onPressed: () => _openEditor(creationKind: AssignmentKind.assessment),
+      icon: const Icon(Icons.assignment_add),
+      label: const Text('Create Assessment'),
+    );
+
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [taskButton, const SizedBox(height: 8), assessmentButton],
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [taskButton, assessmentButton],
+    );
   }
 
   Future<void> _openReview(TaskAssignment assignment) async {
@@ -290,6 +320,14 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
             }
 
             final assignments = snapshot.data ?? const [];
+            final taskCount = assignments
+                .where((assignment) => assignment.kind == AssignmentKind.task)
+                .length;
+            final assessmentCount = assignments
+                .where(
+                  (assignment) => assignment.kind == AssignmentKind.assessment,
+                )
+                .length;
             final grouped = <String, List<TaskAssignment>>{};
             for (final task in assignments) {
               grouped
@@ -335,7 +373,7 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        'Create assignments and review by employee.',
+                                        'Create tasks and assessments, then review by employee.',
                                         style: Theme.of(
                                           context,
                                         ).textTheme.bodySmall,
@@ -345,21 +383,12 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                                 ),
                                 if (!compact) ...[
                                   const SizedBox(width: 12),
-                                  FilledButton.icon(
-                                    onPressed: () => _openEditor(),
-                                    icon: const Icon(Icons.add_task),
-                                    label: const Text('Create Task'),
-                                  ),
+                                  _buildCreateButtons(compact: false),
                                 ],
                               ],
                             ),
                             const SizedBox(height: 10),
-                            if (compact)
-                              FilledButton.icon(
-                                onPressed: () => _openEditor(),
-                                icon: const Icon(Icons.add_task),
-                                label: const Text('Create Task'),
-                              ),
+                            if (compact) _buildCreateButtons(compact: true),
                             if (compact) const SizedBox(height: 10),
                             LayoutBuilder(
                               builder: (context, inner) {
@@ -370,13 +399,13 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                                       _TaskSummaryTile(
                                         icon: Icons.checklist_rtl_rounded,
                                         label: 'Total Tasks',
-                                        value: '${assignments.length}',
+                                        value: '$taskCount',
                                       ),
                                       const SizedBox(height: 8),
                                       _TaskSummaryTile(
-                                        icon: Icons.people_outline_rounded,
-                                        label: 'Employees',
-                                        value: '${groupedEntries.length}',
+                                        icon: Icons.assignment_outlined,
+                                        label: 'Assessments',
+                                        value: '$assessmentCount',
                                       ),
                                     ],
                                   );
@@ -387,15 +416,15 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                                       child: _TaskSummaryTile(
                                         icon: Icons.checklist_rtl_rounded,
                                         label: 'Total Tasks',
-                                        value: '${assignments.length}',
+                                        value: '$taskCount',
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: _TaskSummaryTile(
-                                        icon: Icons.people_outline_rounded,
-                                        label: 'Employees',
-                                        value: '${groupedEntries.length}',
+                                        icon: Icons.assignment_outlined,
+                                        label: 'Assessments',
+                                        value: '$assessmentCount',
                                       ),
                                     ),
                                   ],
@@ -418,7 +447,7 @@ class _AdminTasksScreenState extends State<AdminTasksScreen> {
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('No tasks yet.'),
+                      child: Text('No tasks or assessments yet.'),
                     ),
                   ),
                 for (final entry in groupedEntries)

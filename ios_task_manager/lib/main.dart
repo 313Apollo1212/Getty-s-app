@@ -8,7 +8,10 @@ import 'src/screens/login_screen.dart';
 import 'src/services/supabase_service.dart';
 import 'src/ui/app_theme.dart';
 
-const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabaseUrl = String.fromEnvironment(
+  'SUPABASE_URL',
+  defaultValue: 'https://frqewgqaukuuwhhuzxqb.supabase.co',
+);
 const _supabaseAnonKey = String.fromEnvironment(
   'SUPABASE_ANON_KEY',
   defaultValue: 'sb_publishable_0bZ99guMKLcUhzxiev7I9w_KE7PLh02',
@@ -18,7 +21,14 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (_supabaseUrl.isNotEmpty && _supabaseAnonKey.isNotEmpty) {
-    await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      anonKey: _supabaseAnonKey,
+      authOptions: const FlutterAuthClientOptions(
+        autoRefreshToken: true,
+        detectSessionInUri: true,
+      ),
+    );
   }
 
   runApp(const TaskManagerApp());

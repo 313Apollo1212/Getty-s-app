@@ -32,9 +32,70 @@ enum TaskStatus {
   }
 }
 
+const _assignmentTypePrefix = '__meta:assignment_type:';
 const _typePrefix = '__type:';
 const _unwantedAnswerPrefix = '__meta:unwanted:';
 const _checkYesDetailsPrefix = '__meta:check_yes_details:';
+
+enum AssignmentKind {
+  assessment,
+  task;
+
+  static AssignmentKind fromString(String? value) {
+    return switch (value?.trim().toLowerCase()) {
+      'task' => AssignmentKind.task,
+      _ => AssignmentKind.assessment,
+    };
+  }
+
+  String get value => name;
+
+  String get label {
+    return switch (this) {
+      AssignmentKind.assessment => 'Assessment',
+      AssignmentKind.task => 'Task',
+    };
+  }
+}
+
+class ParsedAssignmentInstructions {
+  const ParsedAssignmentInstructions({
+    required this.kind,
+    required this.instructions,
+  });
+
+  final AssignmentKind kind;
+  final String instructions;
+}
+
+ParsedAssignmentInstructions parseAssignmentInstructions(String raw) {
+  final normalized = raw.replaceAll('\r\n', '\n');
+  if (!normalized.startsWith(_assignmentTypePrefix)) {
+    return ParsedAssignmentInstructions(
+      kind: AssignmentKind.assessment,
+      instructions: raw,
+    );
+  }
+
+  final lines = normalized.split('\n');
+  final kindLine = lines.first;
+  final kindValue = kindLine.replaceFirst(_assignmentTypePrefix, '').trim();
+  final kind = AssignmentKind.fromString(kindValue);
+  final body = lines.length > 1 ? lines.skip(1).join('\n') : '';
+  return ParsedAssignmentInstructions(kind: kind, instructions: body);
+}
+
+String encodeAssignmentInstructions({
+  required AssignmentKind kind,
+  required String instructions,
+}) {
+  final parsed = parseAssignmentInstructions(instructions);
+  final clean = parsed.instructions.trim();
+  if (clean.isEmpty) {
+    return '$_assignmentTypePrefix${kind.value}';
+  }
+  return '$_assignmentTypePrefix${kind.value}\n$clean';
+}
 
 enum QuestionInputType {
   text,
@@ -392,6 +453,7 @@ class TaskAssignment {
     required this.employeeUsername,
     required this.title,
     required this.instructions,
+    required this.kind,
     required this.showAt,
     required this.expectedAt,
     required this.status,
@@ -405,6 +467,7 @@ class TaskAssignment {
   final String employeeUsername;
   final String title;
   final String instructions;
+  final AssignmentKind kind;
   final DateTime showAt;
   final DateTime expectedAt;
   final TaskStatus status;
@@ -413,6 +476,9 @@ class TaskAssignment {
 
   factory TaskAssignment.fromMap(Map<String, dynamic> map) {
     final employee = (map['employee'] as Map<String, dynamic>?) ?? const {};
+    final parsedInstructions = parseAssignmentInstructions(
+      map['instructions'] as String? ?? '',
+    );
 
     return TaskAssignment(
       id: map['id'] as String,
@@ -420,7 +486,8 @@ class TaskAssignment {
       employeeName: employee['full_name'] as String? ?? '',
       employeeUsername: employee['username'] as String? ?? '',
       title: map['title'] as String? ?? '',
-      instructions: map['instructions'] as String? ?? '',
+      instructions: parsedInstructions.instructions,
+      kind: parsedInstructions.kind,
       showAt: DateTime.parse(
         (map['show_at'] as String?) ?? (map['expected_at'] as String),
       ),
@@ -574,6 +641,7 @@ class TaskAssignmentDraft {
     required this.employeeId,
     required this.title,
     required this.instructions,
+    required this.kind,
     required this.showAt,
     required this.expectedAt,
     required this.questions,
@@ -582,6 +650,7 @@ class TaskAssignmentDraft {
   final String employeeId;
   final String title;
   final String instructions;
+  final AssignmentKind kind;
   final DateTime showAt;
   final DateTime expectedAt;
   final List<TaskDraftQuestion> questions;

@@ -15,10 +15,12 @@ class TaskEditorScreen extends StatefulWidget {
     super.key,
     required this.service,
     this.existingAssignment,
+    this.creationKind = AssignmentKind.task,
   });
 
   final SupabaseService service;
   final TaskAssignment? existingAssignment;
+  final AssignmentKind creationKind;
 
   @override
   State<TaskEditorScreen> createState() => _TaskEditorScreenState();
@@ -50,6 +52,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
   late Future<List<Profile>> _employeesFuture;
   final List<_QuestionDraftForm> _questions = [];
+  late final AssignmentKind _editorKind;
 
   bool get _isEdit => widget.existingAssignment != null;
 
@@ -57,6 +60,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   void initState() {
     super.initState();
     _employeesFuture = widget.service.fetchEmployeesOnly();
+    _editorKind = widget.existingAssignment?.kind ?? widget.creationKind;
 
     final existing = widget.existingAssignment;
     if (existing != null) {
@@ -462,6 +466,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
             employeeId: _selectedEmployeeId!,
             title: _titleController.text,
             instructions: _instructionsController.text,
+            kind: _editorKind,
             showAt: _showAt,
             expectedAt: _expectedAt,
             questions: draftQuestions,
@@ -492,6 +497,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
               employeeId: _selectedEmployeeId!,
               title: _titleController.text,
               instructions: _instructionsController.text,
+              kind: _editorKind,
               showAt: item.showAt,
               expectedAt: item.expectedAt,
               questions: draftQuestions,
@@ -522,12 +528,15 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
       }
 
       if (!_isEdit && _scheduleMode == _ScheduleMode.weekdays) {
+        final itemLabel = _editorKind == AssignmentKind.task
+            ? 'tasks'
+            : 'assessments';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               _recurringStopMode == _RecurringStopMode.untilStopped
-                  ? 'Started repeating schedule. Created $createdCount upcoming tasks.'
-                  : 'Created $createdCount tasks.',
+                  ? 'Started repeating schedule. Created $createdCount upcoming $itemLabel.'
+                  : 'Created $createdCount $itemLabel.',
             ),
           ),
         );
@@ -939,9 +948,10 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final recurringCount = _buildRecurringSchedule().length;
+    final label = _editorKind.label;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_isEdit ? 'Edit Task' : 'Create Task')),
+      appBar: AppBar(title: Text(_isEdit ? 'Edit $label' : 'Create $label')),
       body: AppBackground(
         child: _isLoadingQuestions
             ? const Center(child: CircularProgressIndicator())
@@ -984,13 +994,13 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
                             _isLoading
                                 ? 'Saving...'
                                 : _isEdit
-                                ? 'Save Task Changes'
+                                ? 'Save $label Changes'
                                 : _scheduleMode == _ScheduleMode.weekdays
                                 ? _recurringStopMode ==
                                           _RecurringStopMode.untilStopped
                                       ? 'Start Weekly Repeat ($recurringCount queued)'
-                                      : 'Create $recurringCount Scheduled Task${recurringCount == 1 ? '' : 's'}'
-                                : 'Create Task',
+                                      : 'Create $recurringCount Scheduled $label${recurringCount == 1 ? '' : 's'}'
+                                : 'Create $label',
                           ),
                         ),
                         const SizedBox(height: 4),

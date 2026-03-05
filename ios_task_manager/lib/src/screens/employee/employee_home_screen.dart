@@ -130,10 +130,24 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
     }
   }
 
-  List<TaskAssignment> _buildAssessments(_EmployeeTaskPayload payload) {
-    final tasks = payload.tasks.where(_isVisibleNow).toList();
+  List<TaskAssignment> _buildVisibleAssignmentsByKind(
+    _EmployeeTaskPayload payload,
+    AssignmentKind kind,
+  ) {
+    final tasks = payload.tasks
+        .where(_isVisibleNow)
+        .where((task) => task.kind == kind)
+        .toList();
     tasks.sort((a, b) => a.expectedAt.compareTo(b.expectedAt));
     return tasks;
+  }
+
+  List<TaskAssignment> _buildAssessments(_EmployeeTaskPayload payload) {
+    return _buildVisibleAssignmentsByKind(payload, AssignmentKind.assessment);
+  }
+
+  List<TaskAssignment> _buildManualTasks(_EmployeeTaskPayload payload) {
+    return _buildVisibleAssignmentsByKind(payload, AssignmentKind.task);
   }
 
   int _totalMinutesForDay(List<_PlannedTaskOccurrence> items) {
@@ -526,6 +540,32 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   }
 
   Widget _buildAssessmentCard(TaskAssignment task) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _openTask(task),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 10,
+          ),
+          title: Text(
+            task.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          subtitle: Text(
+            'Due ${formatDateTime(task.expectedAt)}',
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          trailing: const Icon(Icons.chevron_right),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManualTaskCard(TaskAssignment task) {
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -978,6 +1018,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
   Widget _buildTaskTab(_EmployeeTaskPayload payload) {
     final assessments = _buildAssessments(payload);
+    final manualTasks = _buildManualTasks(payload);
     final weekday = DateTime.now().weekday;
     final weekdayLabel = _weekdayLongLabel(weekday);
     final balanced = _buildBalancedWeekSchedule(payload.generatedTasks);
@@ -1054,19 +1095,43 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         }
       }
     } else {
-      if (pendingStates.isEmpty) {
+      if (manualTasks.isNotEmpty) {
+        children.add(
+          Text(
+            'Assigned tasks',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        );
+        children.add(const SizedBox(height: 8));
+        for (final task in manualTasks) {
+          children.add(_buildManualTaskCard(task));
+          children.add(const SizedBox(height: 10));
+        }
+      }
+
+      if (pendingStates.isNotEmpty) {
+        children.add(
+          Text(
+            'Auto tasks from assessments',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        );
+        children.add(const SizedBox(height: 8));
+      }
+
+      if (manualTasks.isEmpty && pendingStates.isEmpty) {
         children.add(
           Card(
             child: Padding(
               padding: const EdgeInsets.all(18),
               child: Text(
-                'All tasks for ${weekdayShortLabel(weekday)} are complete.',
+                'No tasks available right now.',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
           ),
         );
-      } else {
+      } else if (pendingStates.isNotEmpty) {
         for (final state in pendingStates) {
           children.add(_buildTasksExecutionCard(state, payload));
           children.add(const SizedBox(height: 10));

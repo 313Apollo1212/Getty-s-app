@@ -494,7 +494,10 @@ class SupabaseService {
     final data = {
       'employee_id': draft.employeeId,
       'title': draft.title.trim(),
-      'instructions': draft.instructions.trim(),
+      'instructions': encodeAssignmentInstructions(
+        kind: draft.kind,
+        instructions: draft.instructions,
+      ),
       'show_at': draft.showAt.toUtc().toIso8601String(),
       'expected_at': draft.expectedAt.toUtc().toIso8601String(),
     };
@@ -851,6 +854,7 @@ class SupabaseService {
     }
 
     final assignmentTitlesById = <String, String>{};
+    final assignmentKindsById = <String, AssignmentKind>{};
     final assignmentIdList = assignmentIds.toList();
     for (var i = 0; i < assignmentIdList.length; i += 200) {
       final end = (i + 200 < assignmentIdList.length)
@@ -859,7 +863,7 @@ class SupabaseService {
       final chunk = assignmentIdList.sublist(i, end);
       final rows = await _client
           .from('task_assignments')
-          .select('id,title,employee_id')
+          .select('id,title,instructions,employee_id')
           .eq('employee_id', user.id)
           .inFilter('id', chunk);
       for (final row in (rows as List).cast<Map<String, dynamic>>()) {
@@ -868,6 +872,10 @@ class SupabaseService {
           continue;
         }
         assignmentTitlesById[id] = row['title'] as String? ?? '';
+        final instructionsRaw = row['instructions'] as String? ?? '';
+        assignmentKindsById[id] = parseAssignmentInstructions(
+          instructionsRaw,
+        ).kind;
       }
     }
 
@@ -900,6 +908,10 @@ class SupabaseService {
       }
       final assignmentId = row['assignment_id'] as String?;
       if (assignmentId == null) {
+        continue;
+      }
+      final assignmentKind = assignmentKindsById[assignmentId];
+      if (assignmentKind != AssignmentKind.assessment) {
         continue;
       }
       final category = assignmentTitlesById[assignmentId]?.trim() ?? '';
