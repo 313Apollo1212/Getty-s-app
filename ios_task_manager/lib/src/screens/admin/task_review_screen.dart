@@ -119,7 +119,8 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
 
     final text = answer.answerText.trim();
     if (question.inputType == QuestionInputType.check) {
-      final isYes = text.toLowerCase() == 'yes';
+      final parsed = CheckAnswerValue.parse(text);
+      final isYes = parsed.isYes;
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -129,7 +130,10 @@ class _TaskReviewScreenState extends State<TaskReviewScreen> {
             color: isYes ? Colors.green : Colors.red,
           ),
           const SizedBox(width: 6),
-          Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(
+            parsed.displayText,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
         ],
       );
     }

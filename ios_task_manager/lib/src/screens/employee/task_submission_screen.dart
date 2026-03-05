@@ -5,6 +5,36 @@ import '../../services/supabase_service.dart';
 import '../../ui/app_theme.dart';
 import '../../utils/time_format.dart';
 
+const _estimateMinuteSteps = <int>[
+  15,
+  30,
+  45,
+  60,
+  75,
+  90,
+  120,
+  150,
+  180,
+  240,
+  300,
+  360,
+  420,
+  480,
+];
+
+int _closestEstimateStepIndex(int minutes) {
+  var bestIndex = 0;
+  var bestDelta = (minutes - _estimateMinuteSteps.first).abs();
+  for (var i = 1; i < _estimateMinuteSteps.length; i++) {
+    final delta = (minutes - _estimateMinuteSteps[i]).abs();
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
 class TaskSubmissionScreen extends StatefulWidget {
   const TaskSubmissionScreen({
     super.key,
@@ -266,6 +296,59 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
   late String? _dropdownValue;
   bool? _checkValue;
   String? _buttonsValue;
+  final Set<int> _yesWeekdays = <int>{};
+  double _estimateIndex = 3;
+  int _priority = 3;
+
+  int get _estimatedMinutes => _estimateMinuteSteps[_estimateIndex.round()];
+
+  Color _priorityColor(int value) {
+    return switch (value) {
+      1 => const Color(0xFFD32F2F),
+      2 => const Color(0xFFF57C00),
+      3 => const Color(0xFFFBC02D),
+      4 => const Color(0xFF7CB342),
+      _ => const Color(0xFF2E7D32),
+    };
+  }
+
+  Color _priorityTextColor(int value) {
+    if (value >= 4) {
+      return Colors.white;
+    }
+    if (value == 3) {
+      return Colors.black;
+    }
+    return Colors.white;
+  }
+
+  String _selectedDaysLabel() {
+    if (_yesWeekdays.isEmpty) {
+      return 'None selected';
+    }
+    final sorted = _yesWeekdays.toList()..sort();
+    return sorted.map(weekdayShortLabel).join(', ');
+  }
+
+  void _syncCheckController() {
+    if (_checkValue == true) {
+      if (widget.question.requiresYesDetails) {
+        final sortedDays = _yesWeekdays.toList()..sort();
+        widget.controller.text = CheckAnswerValue(
+          isYes: true,
+          weekdays: sortedDays,
+          estimatedMinutes: _estimatedMinutes,
+          priority: _priority,
+        ).toStorageText();
+      } else {
+        widget.controller.text = 'Yes';
+      }
+    } else if (_checkValue == false) {
+      widget.controller.text = 'No';
+    } else {
+      widget.controller.text = '';
+    }
+  }
 
   @override
   void initState() {
@@ -278,11 +361,27 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
         _dropdownValue = null;
       }
     } else if (widget.question.inputType == QuestionInputType.check) {
-      final current = widget.controller.text.trim().toLowerCase();
-      if (current == 'yes') {
+      final parsed = CheckAnswerValue.parse(widget.controller.text);
+      if (parsed.isYes) {
         _checkValue = true;
-      } else if (current == 'no') {
-        _checkValue = false;
+      } else {
+        final current = widget.controller.text.trim().toLowerCase();
+        if (current == 'no') {
+          _checkValue = false;
+        }
+      }
+      if (widget.question.requiresYesDetails) {
+        _yesWeekdays
+          ..clear()
+          ..addAll(parsed.weekdays);
+        if (parsed.estimatedMinutes != null) {
+          _estimateIndex = _closestEstimateStepIndex(
+            parsed.estimatedMinutes!,
+          ).toDouble();
+        }
+        if (parsed.priority != null && parsed.priority! >= 1 && parsed.priority! <= 5) {
+          _priority = parsed.priority!;
+        }
       }
     } else if (widget.question.inputType == QuestionInputType.buttons) {
       final current = widget.controller.text.trim();
@@ -403,6 +502,11 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                   if (value == null) {
                     return 'Please choose Yes or No.';
                   }
+                  if (value &&
+                      widget.question.requiresYesDetails &&
+                      _yesWeekdays.isEmpty) {
+                    return 'Pick at least one weekday for the Yes answer.';
+                  }
                   return null;
                 },
                 builder: (state) {
@@ -419,7 +523,7 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                             onSelected: widget.canEdit
                                 ? (_) {
                                     setState(() => _checkValue = true);
-                                    widget.controller.text = 'Yes';
+                                    _syncCheckController();
                                     state.didChange(true);
                                     widget.onAnswerChanged();
                                   }
@@ -431,7 +535,7 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                             onSelected: widget.canEdit
                                 ? (_) {
                                     setState(() => _checkValue = false);
-                                    widget.controller.text = 'No';
+                                    _syncCheckController();
                                     state.didChange(false);
                                     widget.onAnswerChanged();
                                   }
@@ -439,6 +543,136 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
                           ),
                         ],
                       ),
+                      if (_checkValue == true &&
+                          widget.question.requiresYesDetails) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Select weekday(s)',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (var day = 1; day <= 7; day++)
+                              FilterChip(
+                                label: Text(weekdayShortLabel(day)),
+                                selected: _yesWeekdays.contains(day),
+                                onSelected: widget.canEdit
+                                    ? (selected) {
+                                        setState(() {
+                                          if (selected) {
+                                            _yesWeekdays.add(day);
+                                          } else {
+                                            _yesWeekdays.remove(day);
+                                          }
+                                        });
+                                        _syncCheckController();
+                                        state.didChange(true);
+                                        widget.onAnswerChanged();
+                                      }
+                                    : null,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Selected: ${_selectedDaysLabel()}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (_yesWeekdays.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Estimated time: ${formatDurationMinutes(_estimatedMinutes)}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          Slider(
+                            value: _estimateIndex,
+                            min: 0,
+                            max: (_estimateMinuteSteps.length - 1).toDouble(),
+                            divisions: _estimateMinuteSteps.length - 1,
+                            label: formatDurationMinutes(_estimatedMinutes),
+                            onChanged: widget.canEdit
+                                ? (value) {
+                                    setState(() => _estimateIndex = value);
+                                    _syncCheckController();
+                                    widget.onAnswerChanged();
+                                  }
+                                : null,
+                          ),
+                          Text(
+                            'Priority: $_priority',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (var value = 1; value <= 5; value++)
+                                OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    backgroundColor: _priority == value
+                                        ? _priorityColor(value)
+                                        : _priorityColor(
+                                            value,
+                                          ).withValues(alpha: 0.12),
+                                    foregroundColor: _priority == value
+                                        ? _priorityTextColor(value)
+                                        : _priorityColor(value),
+                                    side: BorderSide(
+                                      color: _priorityColor(value),
+                                      width: _priority == value ? 2 : 1,
+                                    ),
+                                  ),
+                                  onPressed: !widget.canEdit
+                                      ? null
+                                      : () {
+                                          setState(() => _priority = value);
+                                          _syncCheckController();
+                                          widget.onAnswerChanged();
+                                        },
+                                  child: Text(
+                                    '$value',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF4F8EC),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFFD6E2C9),
+                              ),
+                            ),
+                            child: const Text(
+                              'Priority scale: 1 = highest urgency, 2 = high, 3 = medium, 4 = low, 5 = lowest urgency.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                       if (state.hasError) ...[
                         const SizedBox(height: 6),
                         Text(

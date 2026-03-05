@@ -34,6 +34,7 @@ enum TaskStatus {
 
 const _typePrefix = '__type:';
 const _unwantedAnswerPrefix = '__meta:unwanted:';
+const _checkYesDetailsPrefix = '__meta:check_yes_details:';
 
 enum QuestionInputType {
   text,
@@ -75,6 +76,148 @@ enum QuestionInputType {
       QuestionInputType.buttons => 'Buttons',
     };
   }
+}
+
+String weekdayShortLabel(int weekday) {
+  return switch (weekday) {
+    DateTime.monday => 'Mon',
+    DateTime.tuesday => 'Tue',
+    DateTime.wednesday => 'Wed',
+    DateTime.thursday => 'Thu',
+    DateTime.friday => 'Fri',
+    DateTime.saturday => 'Sat',
+    DateTime.sunday => 'Sun',
+    _ => 'Day',
+  };
+}
+
+int? weekdayFromShortLabel(String raw) {
+  final normalized = raw.trim().toLowerCase();
+  return switch (normalized) {
+    'mon' => DateTime.monday,
+    'tue' => DateTime.tuesday,
+    'wed' => DateTime.wednesday,
+    'thu' => DateTime.thursday,
+    'fri' => DateTime.friday,
+    'sat' => DateTime.saturday,
+    'sun' => DateTime.sunday,
+    _ => null,
+  };
+}
+
+String formatDurationMinutes(int totalMinutes) {
+  if (totalMinutes < 60) {
+    return '${totalMinutes}m';
+  }
+  final hours = totalMinutes ~/ 60;
+  final minutes = totalMinutes % 60;
+  if (minutes == 0) {
+    return '${hours}h';
+  }
+  return '${hours}h ${minutes}m';
+}
+
+class CheckAnswerValue {
+  const CheckAnswerValue({
+    required this.isYes,
+    this.weekdays = const <int>[],
+    this.estimatedMinutes,
+    this.priority,
+  });
+
+  final bool isYes;
+  final List<int> weekdays;
+  final int? estimatedMinutes;
+  final int? priority;
+
+  int? get weekday => weekdays.isEmpty ? null : weekdays.first;
+
+  bool get hasDetails {
+    return isYes &&
+        weekdays.isNotEmpty &&
+        estimatedMinutes != null &&
+        priority != null;
+  }
+
+  String get baseAnswer => isYes ? 'Yes' : 'No';
+
+  String toStorageText() {
+    if (!hasDetails) {
+      return baseAnswer;
+    }
+    final dayLabel = weekdays.map(weekdayShortLabel).join(',');
+    return '$baseAnswer | $dayLabel | ${estimatedMinutes}m | P$priority';
+  }
+
+  String get displayText {
+    if (!hasDetails) {
+      return baseAnswer;
+    }
+    final dayLabel = weekdays.map(weekdayShortLabel).join(', ');
+    return '$baseAnswer • $dayLabel • ${formatDurationMinutes(estimatedMinutes!)} • P$priority';
+  }
+
+  static CheckAnswerValue parse(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) {
+      return const CheckAnswerValue(isYes: false);
+    }
+
+    final segments = text.split('|').map((entry) => entry.trim()).toList();
+    final head = segments.first.toLowerCase();
+    final isYes = head.startsWith('yes');
+    final isNo = head.startsWith('no');
+    if (!isYes && !isNo) {
+      return const CheckAnswerValue(isYes: false);
+    }
+
+    var weekdays = <int>[];
+    int? estimatedMinutes;
+    int? priority;
+
+    if (segments.length >= 2) {
+      weekdays = segments[1]
+          .split(',')
+          .map((entry) => weekdayFromShortLabel(entry))
+          .whereType<int>()
+          .toSet()
+          .toList()
+        ..sort();
+    }
+    if (segments.length >= 3) {
+      final minutesMatch = RegExp(r'(\d+)').firstMatch(segments[2]);
+      if (minutesMatch != null) {
+        estimatedMinutes = int.tryParse(minutesMatch.group(1)!);
+      }
+    }
+    if (segments.length >= 4) {
+      final priorityMatch = RegExp(r'([1-5])').firstMatch(segments[3]);
+      if (priorityMatch != null) {
+        priority = int.tryParse(priorityMatch.group(1)!);
+      }
+    }
+
+    return CheckAnswerValue(
+      isYes: isYes,
+      weekdays: weekdays,
+      estimatedMinutes: estimatedMinutes,
+      priority: priority,
+    );
+  }
+}
+
+class TaskPriorityHint {
+  const TaskPriorityHint({
+    required this.weekday,
+    required this.priority,
+    required this.estimatedMinutes,
+    required this.answeredAt,
+  });
+
+  final int weekday;
+  final int priority;
+  final int estimatedMinutes;
+  final DateTime answeredAt;
 }
 
 class TaskAssignment {
@@ -136,6 +279,7 @@ class AssignmentQuestion {
     required this.sortOrder,
     required this.dropdownOptions,
     required this.unwantedAnswer,
+    required this.requiresYesDetails,
   });
 
   final String id;
@@ -145,6 +289,7 @@ class AssignmentQuestion {
   final int sortOrder;
   final List<String> dropdownOptions;
   final String? unwantedAnswer;
+  final bool requiresYesDetails;
 
   factory AssignmentQuestion.fromMap(Map<String, dynamic> map) {
     final optionsRaw = map['dropdown_options'];
@@ -157,6 +302,7 @@ class AssignmentQuestion {
 
     String? storedType;
     String? unwantedAnswer;
+    var requiresYesDetails = false;
     final cleanedOptions = <String>[];
 
     for (final option in options) {
@@ -173,6 +319,11 @@ class AssignmentQuestion {
             unwantedAnswer = encoded;
           }
         }
+        continue;
+      }
+      if (option.startsWith(_checkYesDetailsPrefix)) {
+        final value = option.replaceFirst(_checkYesDetailsPrefix, '').trim();
+        requiresYesDetails = value != '0';
         continue;
       }
       cleanedOptions.add(option);
@@ -207,6 +358,7 @@ class AssignmentQuestion {
       sortOrder: (map['sort_order'] as num?)?.toInt() ?? 0,
       dropdownOptions: cleanedOptions,
       unwantedAnswer: unwantedAnswer,
+      requiresYesDetails: requiresYesDetails,
     );
   }
 }
@@ -243,12 +395,14 @@ class TaskDraftQuestion {
     required this.inputType,
     required this.dropdownOptions,
     this.unwantedAnswer,
+    this.requiresYesDetails = false,
   });
 
   final String prompt;
   final QuestionInputType inputType;
   final List<String> dropdownOptions;
   final String? unwantedAnswer;
+  final bool requiresYesDetails;
 }
 
 class TaskAssignmentDraft {

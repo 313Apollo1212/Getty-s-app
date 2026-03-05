@@ -97,6 +97,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
             type: row.inputType,
             options: row.dropdownOptions.join(', '),
             unwantedAnswer: row.unwantedAnswer ?? '',
+            requiresYesDetails: row.requiresYesDetails,
           ),
         );
       }
@@ -403,6 +404,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
           unwantedAnswer: question.notifyOnUnwantedAnswer
               ? unwantedAnswer
               : null,
+          requiresYesDetails: question.requiresYesDetails,
         ),
       );
     }
@@ -1117,6 +1119,7 @@ class _QuestionDraftForm {
     this.type = QuestionInputType.text,
     String options = '',
     String unwantedAnswer = '',
+    this.requiresYesDetails = false,
   }) : promptController = TextEditingController(text: prompt),
        optionsController = TextEditingController(text: options),
        unwantedAnswerController = TextEditingController(text: unwantedAnswer),
@@ -1127,6 +1130,7 @@ class _QuestionDraftForm {
   final TextEditingController unwantedAnswerController;
   QuestionInputType type;
   bool notifyOnUnwantedAnswer;
+  bool requiresYesDetails;
 
   void dispose() {
     promptController.dispose();
@@ -1193,7 +1197,12 @@ class _QuestionCardState extends State<_QuestionCard> {
                   .toList(),
               onChanged: (value) {
                 if (value != null) {
-                  setState(() => widget.question.type = value);
+                  setState(() {
+                    widget.question.type = value;
+                    if (value != QuestionInputType.check) {
+                      widget.question.requiresYesDetails = false;
+                    }
+                  });
                 }
               },
             ),
@@ -1208,6 +1217,25 @@ class _QuestionCardState extends State<_QuestionCard> {
                       : 'Dropdown options (comma separated)',
                   helperText: 'Example: Yes, No',
                 ),
+              ),
+            ],
+            if (widget.question.type == QuestionInputType.check) ...[
+              const SizedBox(height: 8),
+              SwitchListTile.adaptive(
+                value: widget.question.requiresYesDetails,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'If employee answers Yes, ask for day + estimate + priority',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  'Shows a Mon-Sun picker, estimated time slider, and 1-5 priority on employee submit.',
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    widget.question.requiresYesDetails = value;
+                  });
+                },
               ),
             ],
             const SizedBox(height: 8),

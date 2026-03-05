@@ -5,6 +5,7 @@ import '../models/profile.dart';
 import '../models/task_models.dart';
 
 const _unwantedAnswerPrefix = '__meta:unwanted:';
+const _checkYesDetailsPrefix = '__meta:check_yes_details:';
 const _defaultCacheTtl = Duration(seconds: 30);
 const _dismissedAlertKeysStorageKey = 'dismissed_flagged_alert_keys_v1';
 
@@ -514,6 +515,10 @@ class SupabaseService {
             '$_unwantedAnswerPrefix${Uri.encodeComponent(question.unwantedAnswer!.trim())}',
           );
         }
+        if (question.inputType == QuestionInputType.check &&
+            question.requiresYesDetails) {
+          dropdownOptions.add('${_checkYesDetailsPrefix}1');
+        }
         if (question.inputType == QuestionInputType.check) {
           dropdownOptions.addAll(const ['Yes', 'No']);
         } else if (question.inputType == QuestionInputType.dropdown ||
@@ -708,6 +713,67 @@ class SupabaseService {
     } on PostgrestException catch (error) {
       throw AppException(error.message);
     }
+  }
+
+  Future<Map<String, TaskPriorityHint>> fetchCurrentEmployeePriorityHints({
+    bool forceRefresh = false,
+    int? weekday,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final targetWeekday = weekday ?? DateTime.now().weekday;
+    final entries = await fetchDashboardAnswerEntries(forceRefresh: forceRefresh);
+    final byTaskTitle = <String, TaskPriorityHint>{};
+
+    for (final entry in entries) {
+      if (entry.assignment.employeeId != user.id) {
+        continue;
+      }
+      if (entry.question.inputType != QuestionInputType.check) {
+        continue;
+      }
+
+      final parsed = CheckAnswerValue.parse(entry.answer.answerText);
+      if (!parsed.hasDetails || !parsed.isYes) {
+        continue;
+      }
+      if (!parsed.weekdays.contains(targetWeekday)) {
+        continue;
+      }
+
+      final key = entry.assignment.title.trim().toLowerCase();
+      if (key.isEmpty) {
+        continue;
+      }
+
+      final candidate = TaskPriorityHint(
+        weekday: targetWeekday,
+        priority: parsed.priority!,
+        estimatedMinutes: parsed.estimatedMinutes!,
+        answeredAt: entry.answer.answeredAt,
+      );
+      final existing = byTaskTitle[key];
+      if (existing == null) {
+        byTaskTitle[key] = candidate;
+        continue;
+      }
+
+      final isBetter =
+          candidate.priority < existing.priority ||
+          (candidate.priority == existing.priority &&
+              candidate.estimatedMinutes < existing.estimatedMinutes) ||
+          (candidate.priority == existing.priority &&
+              candidate.estimatedMinutes == existing.estimatedMinutes &&
+              candidate.answeredAt.isAfter(existing.answeredAt));
+      if (isBetter) {
+        byTaskTitle[key] = candidate;
+      }
+    }
+
+    return byTaskTitle;
   }
 
   Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts({

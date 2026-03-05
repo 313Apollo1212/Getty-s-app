@@ -22,7 +22,7 @@ class EmployeeHomeScreen extends StatefulWidget {
 }
 
 class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
-  late Future<List<TaskAssignment>> _tasksFuture;
+  late Future<_EmployeeTaskPayload> _tasksFuture;
 
   bool _isActionable(TaskAssignment task) {
     return task.status == TaskStatus.pending ||
@@ -40,14 +40,24 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _tasksFuture = widget.service.fetchAssignmentsForCurrentEmployee();
+    _tasksFuture = _loadTasks();
+  }
+
+  Future<_EmployeeTaskPayload> _loadTasks({bool forceRefresh = false}) async {
+    final results = await Future.wait<dynamic>([
+      widget.service.fetchAssignmentsForCurrentEmployee(forceRefresh: forceRefresh),
+      widget.service.fetchCurrentEmployeePriorityHints(forceRefresh: forceRefresh),
+    ]);
+
+    return _EmployeeTaskPayload(
+      tasks: results[0] as List<TaskAssignment>,
+      hintsByTitle: results[1] as Map<String, TaskPriorityHint>,
+    );
   }
 
   Future<void> _reload() async {
     setState(() {
-      _tasksFuture = widget.service.fetchAssignmentsForCurrentEmployee(
-        forceRefresh: true,
-      );
+      _tasksFuture = _loadTasks(forceRefresh: true);
     });
   }
 
@@ -105,7 +115,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       body: AppBackground(
         child: RefreshIndicator(
           onRefresh: _reload,
-          child: FutureBuilder<List<TaskAssignment>>(
+          child: FutureBuilder<_EmployeeTaskPayload>(
             future: _tasksFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
@@ -131,16 +141,50 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                 );
               }
 
-              final allTasks = snapshot.data ?? const [];
-              final tasks = allTasks.where(_isVisibleNow).toList();
-              if (tasks.isEmpty) {
+              final payload =
+                  snapshot.data ??
+                  const _EmployeeTaskPayload(
+                    tasks: <TaskAssignment>[],
+                    hintsByTitle: <String, TaskPriorityHint>{},
+                  );
+              final allTasks = payload.tasks;
+              final actionableTasks = allTasks.where(_isVisibleNow).toList();
+              final todayWeekday = DateTime.now().weekday;
+              final rankedTasks = <_RankedTask>[];
+              for (final task in actionableTasks) {
+                final key = task.title.trim().toLowerCase();
+                final hint = payload.hintsByTitle[key];
+                if (hint == null || hint.weekday != todayWeekday) {
+                  continue;
+                }
+                rankedTasks.add(_RankedTask(task: task, hint: hint));
+              }
+
+              rankedTasks.sort((a, b) {
+                final byPriority = a.hint.priority.compareTo(b.hint.priority);
+                if (byPriority != 0) {
+                  return byPriority;
+                }
+                final byEstimate = a.hint.estimatedMinutes.compareTo(
+                  b.hint.estimatedMinutes,
+                );
+                if (byEstimate != 0) {
+                  return byEstimate;
+                }
+                return a.task.expectedAt.compareTo(b.task.expectedAt);
+              });
+
+              if (rankedTasks.isEmpty) {
                 return ListView(
                   padding: appPagePadding,
-                  children: const [
+                  children: [
                     Card(
                       child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('No tasks due right now.'),
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'No tasks for ${weekdayShortLabel(todayWeekday)} yet. '
+                          'This view requires Yes answers with weekday entry.',
+                        ),
                       ),
                     ),
                   ],
@@ -149,10 +193,12 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
               return ListView.separated(
                 padding: appPagePadding,
-                itemCount: tasks.length,
+                itemCount: rankedTasks.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
-                  final task = tasks[index];
+                  final ranked = rankedTasks[index];
+                  final task = ranked.task;
+                  final hint = ranked.hint;
                   return Card(
                     child: InkWell(
                       borderRadius: BorderRadius.circular(18),
@@ -167,6 +213,11 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
+                        subtitle: Text(
+                          '${weekdayShortLabel(hint.weekday)} • '
+                          'Priority ${hint.priority} • '
+                          '${formatDurationMinutes(hint.estimatedMinutes)}',
+                        ),
                       ),
                     ),
                   );
@@ -178,4 +229,21 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       ),
     );
   }
+}
+
+class _EmployeeTaskPayload {
+  const _EmployeeTaskPayload({
+    required this.tasks,
+    required this.hintsByTitle,
+  });
+
+  final List<TaskAssignment> tasks;
+  final Map<String, TaskPriorityHint> hintsByTitle;
+}
+
+class _RankedTask {
+  const _RankedTask({required this.task, required this.hint});
+
+  final TaskAssignment task;
+  final TaskPriorityHint hint;
 }
