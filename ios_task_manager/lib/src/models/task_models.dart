@@ -220,6 +220,104 @@ class TaskPriorityHint {
   final DateTime answeredAt;
 }
 
+class GeneratedTaskItem {
+  const GeneratedTaskItem({
+    required this.categoryTitle,
+    required this.prompt,
+    required this.weekdays,
+    required this.estimatedMinutes,
+    required this.priority,
+    required this.answeredAt,
+  });
+
+  final String categoryTitle;
+  final String prompt;
+  final List<int> weekdays;
+  final int estimatedMinutes;
+  final int priority;
+  final DateTime answeredAt;
+}
+
+enum GeneratedTaskOutcome {
+  done,
+  notDone,
+  needsMoreTime;
+
+  String get value {
+    return switch (this) {
+      GeneratedTaskOutcome.done => 'done',
+      GeneratedTaskOutcome.notDone => 'not_done',
+      GeneratedTaskOutcome.needsMoreTime => 'needs_more_time',
+    };
+  }
+
+  String get label {
+    return switch (this) {
+      GeneratedTaskOutcome.done => 'Completed',
+      GeneratedTaskOutcome.notDone => 'Not completed',
+      GeneratedTaskOutcome.needsMoreTime => 'Needs more time',
+    };
+  }
+
+  static GeneratedTaskOutcome fromString(String value) {
+    return switch (value) {
+      'done' => GeneratedTaskOutcome.done,
+      'not_done' => GeneratedTaskOutcome.notDone,
+      'needs_more_time' => GeneratedTaskOutcome.needsMoreTime,
+      _ => GeneratedTaskOutcome.done,
+    };
+  }
+}
+
+class GeneratedTaskActionLog {
+  const GeneratedTaskActionLog({
+    required this.id,
+    required this.employeeId,
+    required this.categoryTitle,
+    required this.prompt,
+    required this.scheduledWeekday,
+    required this.originalWeekday,
+    required this.priority,
+    required this.estimatedMinutes,
+    required this.outcome,
+    required this.workDate,
+    required this.submittedAt,
+    this.extraMinutes,
+  });
+
+  final String id;
+  final String employeeId;
+  final String categoryTitle;
+  final String prompt;
+  final int scheduledWeekday;
+  final int originalWeekday;
+  final int priority;
+  final int estimatedMinutes;
+  final GeneratedTaskOutcome outcome;
+  final int? extraMinutes;
+  final DateTime workDate;
+  final DateTime submittedAt;
+
+  factory GeneratedTaskActionLog.fromMap(Map<String, dynamic> map) {
+    return GeneratedTaskActionLog(
+      id: map['id'] as String,
+      employeeId: map['employee_id'] as String,
+      categoryTitle: map['category_title'] as String? ?? '',
+      prompt: map['prompt'] as String? ?? '',
+      scheduledWeekday: (map['scheduled_weekday'] as num?)?.toInt() ?? 1,
+      originalWeekday: (map['original_weekday'] as num?)?.toInt() ?? 1,
+      priority: (map['priority'] as num?)?.toInt() ?? 3,
+      estimatedMinutes: (map['estimated_minutes'] as num?)?.toInt() ?? 0,
+      outcome: GeneratedTaskOutcome.fromString(
+        map['outcome'] as String? ?? 'done',
+      ),
+      extraMinutes: (map['extra_minutes'] as num?)?.toInt(),
+      workDate: DateTime.parse(map['work_date'] as String),
+      submittedAt: DateTime.parse(map['submitted_at'] as String),
+    );
+  }
+}
+
 class TaskAssignment {
   const TaskAssignment({
     required this.id,

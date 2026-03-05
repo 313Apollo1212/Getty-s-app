@@ -8,6 +8,7 @@ const _unwantedAnswerPrefix = '__meta:unwanted:';
 const _checkYesDetailsPrefix = '__meta:check_yes_details:';
 const _defaultCacheTtl = Duration(seconds: 30);
 const _dismissedAlertKeysStorageKey = 'dismissed_flagged_alert_keys_v1';
+const _generatedTaskActionsTable = 'generated_task_actions';
 
 class AppException implements Exception {
   const AppException(this.message);
@@ -28,6 +29,8 @@ class SupabaseService {
   _assignmentQuestionsCache = {};
   final Map<String, _TimedValue<Map<String, QuestionAnswer>>>
   _answersByAssignmentAndEmployeeCache = {};
+  final Map<String, _TimedValue<List<GeneratedTaskActionLog>>>
+  _generatedTaskLogsByDateCache = {};
 
   _TimedValue<List<Profile>>? _allUsersCache;
   _TimedValue<List<Profile>>? _employeesOnlyCache;
@@ -96,6 +99,14 @@ class SupabaseService {
       _assignmentQuestionsCache.clear();
       _answersByAssignmentAndEmployeeCache.clear();
     }
+
+    if (clearAllEmployeeAssignments) {
+      _generatedTaskLogsByDateCache.clear();
+    } else if (employeeId != null) {
+      _generatedTaskLogsByDateCache.removeWhere(
+        (key, _) => key.startsWith('$employeeId|'),
+      );
+    }
   }
 
   void _clearAllCaches() {
@@ -108,6 +119,7 @@ class SupabaseService {
     _employeeAssignmentsCache.clear();
     _assignmentQuestionsCache.clear();
     _answersByAssignmentAndEmployeeCache.clear();
+    _generatedTaskLogsByDateCache.clear();
   }
 
   Future<Profile?> fetchCurrentProfile() async {
@@ -776,6 +788,188 @@ class SupabaseService {
     return byTaskTitle;
   }
 
+  Future<List<GeneratedTaskItem>> fetchCurrentEmployeeGeneratedTasks({
+    bool forceRefresh = false,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final results = await Future.wait<dynamic>([
+      fetchAssignmentsForCurrentEmployee(forceRefresh: forceRefresh),
+      _client.from('assignment_questions').select(),
+      _client
+          .from('question_answers')
+          .select()
+          .eq('employee_id', user.id)
+          .order('answered_at', ascending: false),
+    ]);
+
+    final assignments = results[0] as List<TaskAssignment>;
+    final questionRows = results[1];
+    final answerRows = results[2];
+
+    final assignmentById = <String, TaskAssignment>{
+      for (final item in assignments) item.id: item,
+    };
+    final questionById = <String, AssignmentQuestion>{};
+    for (final row in (questionRows as List).cast<Map<String, dynamic>>()) {
+      final question = AssignmentQuestion.fromMap(row);
+      questionById[question.id] = question;
+    }
+
+    final latestByQuestion = <String, GeneratedTaskItem>{};
+    for (final row in (answerRows as List).cast<Map<String, dynamic>>()) {
+      final answer = QuestionAnswer.fromMap(row);
+      final question = questionById[answer.questionId];
+      if (question == null) {
+        continue;
+      }
+      final assignmentId = row['assignment_id'] as String?;
+      if (assignmentId == null) {
+        continue;
+      }
+      final assignment = assignmentById[assignmentId];
+      if (assignment == null) {
+        continue;
+      }
+
+      final parsed = CheckAnswerValue.parse(answer.answerText);
+      if (!parsed.hasDetails || !parsed.isYes) {
+        continue;
+      }
+
+      final category = assignment.title.trim();
+      final prompt = question.prompt.trim();
+      if (category.isEmpty || prompt.isEmpty) {
+        continue;
+      }
+      final key = '${category.toLowerCase()}|${prompt.toLowerCase()}';
+      latestByQuestion.putIfAbsent(
+        key,
+        () => GeneratedTaskItem(
+          categoryTitle: category,
+          prompt: prompt,
+          weekdays: parsed.weekdays,
+          estimatedMinutes: parsed.estimatedMinutes!,
+          priority: parsed.priority!,
+          answeredAt: answer.answeredAt,
+        ),
+      );
+    }
+
+    final tasks = <GeneratedTaskItem>[];
+    tasks.addAll(latestByQuestion.values);
+
+    tasks.sort((a, b) {
+      final byPriority = a.priority.compareTo(b.priority);
+      if (byPriority != 0) {
+        return byPriority;
+      }
+      final byEstimate = a.estimatedMinutes.compareTo(b.estimatedMinutes);
+      if (byEstimate != 0) {
+        return byEstimate;
+      }
+      final byCategory = a.categoryTitle.toLowerCase().compareTo(
+        b.categoryTitle.toLowerCase(),
+      );
+      if (byCategory != 0) {
+        return byCategory;
+      }
+      return a.prompt.toLowerCase().compareTo(b.prompt.toLowerCase());
+    });
+    return tasks;
+  }
+
+  Future<List<GeneratedTaskActionLog>> fetchCurrentEmployeeGeneratedTaskLogs({
+    required DateTime workDate,
+    bool forceRefresh = false,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final dateKey = _dateOnlyKey(workDate);
+    final cacheKey = '${user.id}|$dateKey';
+    final cached = _generatedTaskLogsByDateCache[cacheKey];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
+    try {
+      final rows = await _client
+          .from(_generatedTaskActionsTable)
+          .select()
+          .eq('employee_id', user.id)
+          .eq('work_date', dateKey)
+          .order('submitted_at', ascending: false);
+
+      final result = (rows as List)
+          .cast<Map<String, dynamic>>()
+          .map(GeneratedTaskActionLog.fromMap)
+          .toList();
+      _generatedTaskLogsByDateCache[cacheKey] = _TimedValue(result);
+      return result;
+    } on PostgrestException catch (error) {
+      if (_isGeneratedTaskActionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for generated_task_actions before using task execution tracking.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
+  Future<void> saveGeneratedTaskAction({
+    required String categoryTitle,
+    required String prompt,
+    required int scheduledWeekday,
+    required int originalWeekday,
+    required int priority,
+    required int estimatedMinutes,
+    required GeneratedTaskOutcome outcome,
+    int? extraMinutes,
+    DateTime? workDate,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final localWorkDate = workDate ?? DateTime.now();
+    final payload = <String, dynamic>{
+      'employee_id': user.id,
+      'category_title': categoryTitle.trim(),
+      'prompt': prompt.trim(),
+      'scheduled_weekday': scheduledWeekday,
+      'original_weekday': originalWeekday,
+      'priority': priority,
+      'estimated_minutes': estimatedMinutes,
+      'outcome': outcome.value,
+      'extra_minutes': outcome == GeneratedTaskOutcome.needsMoreTime
+          ? (extraMinutes ?? 15)
+          : null,
+      'work_date': _dateOnlyKey(localWorkDate),
+      'submitted_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+    try {
+      await _client.from(_generatedTaskActionsTable).insert(payload);
+      _generatedTaskLogsByDateCache.removeWhere(
+        (key, _) => key.startsWith('${user.id}|'),
+      );
+    } on PostgrestException catch (error) {
+      if (_isGeneratedTaskActionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for generated_task_actions before using task execution tracking.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
   Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts({
     bool forceRefresh = false,
   }) async {
@@ -926,6 +1120,22 @@ class SupabaseService {
     final lower = message.toLowerCase();
     return lower.contains('show_at') &&
         (lower.contains('column') || lower.contains('schema cache'));
+  }
+
+  bool _isGeneratedTaskActionsTableMissing(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('generated_task_actions') &&
+        (lower.contains('does not exist') ||
+            lower.contains('schema cache') ||
+            lower.contains('relation'));
+  }
+
+  String _dateOnlyKey(DateTime value) {
+    final local = value.toLocal();
+    final year = local.year.toString().padLeft(4, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
   }
 }
 
