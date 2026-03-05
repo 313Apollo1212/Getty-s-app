@@ -31,6 +31,8 @@ class SupabaseService {
   _answersByAssignmentAndEmployeeCache = {};
   final Map<String, _TimedValue<List<GeneratedTaskActionLog>>>
   _generatedTaskLogsByDateCache = {};
+  final Map<String, _TimedValue<List<GeneratedTaskActionLog>>>
+  _generatedTaskLogsByRangeCache = {};
 
   _TimedValue<List<Profile>>? _allUsersCache;
   _TimedValue<List<Profile>>? _employeesOnlyCache;
@@ -102,8 +104,12 @@ class SupabaseService {
 
     if (clearAllEmployeeAssignments) {
       _generatedTaskLogsByDateCache.clear();
+      _generatedTaskLogsByRangeCache.clear();
     } else if (employeeId != null) {
       _generatedTaskLogsByDateCache.removeWhere(
+        (key, _) => key.startsWith('$employeeId|'),
+      );
+      _generatedTaskLogsByRangeCache.removeWhere(
         (key, _) => key.startsWith('$employeeId|'),
       );
     }
@@ -120,6 +126,7 @@ class SupabaseService {
     _assignmentQuestionsCache.clear();
     _answersByAssignmentAndEmployeeCache.clear();
     _generatedTaskLogsByDateCache.clear();
+    _generatedTaskLogsByRangeCache.clear();
   }
 
   Future<Profile?> fetchCurrentProfile() async {
@@ -922,6 +929,50 @@ class SupabaseService {
     }
   }
 
+  Future<List<GeneratedTaskActionLog>>
+  fetchCurrentEmployeeGeneratedTaskLogsRange({
+    required DateTime startDate,
+    required DateTime endDate,
+    bool forceRefresh = false,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final startKey = _dateOnlyKey(startDate);
+    final endKey = _dateOnlyKey(endDate);
+    final cacheKey = '${user.id}|$startKey|$endKey';
+    final cached = _generatedTaskLogsByRangeCache[cacheKey];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
+    try {
+      final rows = await _client
+          .from(_generatedTaskActionsTable)
+          .select()
+          .eq('employee_id', user.id)
+          .gte('work_date', startKey)
+          .lte('work_date', endKey)
+          .order('submitted_at', ascending: false);
+
+      final result = (rows as List)
+          .cast<Map<String, dynamic>>()
+          .map(GeneratedTaskActionLog.fromMap)
+          .toList();
+      _generatedTaskLogsByRangeCache[cacheKey] = _TimedValue(result);
+      return result;
+    } on PostgrestException catch (error) {
+      if (_isGeneratedTaskActionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for generated_task_actions before using task execution tracking.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
   Future<void> saveGeneratedTaskAction({
     required String categoryTitle,
     required String prompt,
@@ -958,6 +1009,9 @@ class SupabaseService {
     try {
       await _client.from(_generatedTaskActionsTable).insert(payload);
       _generatedTaskLogsByDateCache.removeWhere(
+        (key, _) => key.startsWith('${user.id}|'),
+      );
+      _generatedTaskLogsByRangeCache.removeWhere(
         (key, _) => key.startsWith('${user.id}|'),
       );
     } on PostgrestException catch (error) {

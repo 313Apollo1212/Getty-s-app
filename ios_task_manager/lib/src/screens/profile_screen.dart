@@ -107,6 +107,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canEditProfile = widget.currentUser.role.isAdmin;
+
+    if (!canEditProfile) {
+      return AppBackground(
+        child: ListView(
+          padding: appPagePadding,
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Account',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 10),
+                    Text('Full Name', style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 4),
+                    Text(widget.currentUser.fullName),
+                    const SizedBox(height: 10),
+                    Text('Username', style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 4),
+                    Text(widget.currentUser.username),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _isSaving ? null : _signOut,
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Log Out'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Form(
       key: _formKey,
       child: AppBackground(

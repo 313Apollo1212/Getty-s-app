@@ -22,6 +22,34 @@ const _extraTimeMinuteSteps = <int>[
   240,
 ];
 
+DateTime _dateOnly(DateTime value) => DateTime(value.year, value.month, value.day);
+
+DateTime _startOfWeek(DateTime value) {
+  final date = _dateOnly(value);
+  return date.subtract(Duration(days: date.weekday - 1));
+}
+
+String _weekdayLongLabel(int weekday) {
+  return switch (weekday) {
+    DateTime.monday => 'Monday',
+    DateTime.tuesday => 'Tuesday',
+    DateTime.wednesday => 'Wednesday',
+    DateTime.thursday => 'Thursday',
+    DateTime.friday => 'Friday',
+    DateTime.saturday => 'Saturday',
+    DateTime.sunday => 'Sunday',
+    _ => 'Day',
+  };
+}
+
+String _formatClock(DateTime value) {
+  final local = value.toLocal();
+  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '$hour:$minute $period';
+}
+
 class EmployeeHomeScreen extends StatefulWidget {
   const EmployeeHomeScreen({
     super.key,
@@ -40,10 +68,9 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   late Future<_EmployeeTaskPayload> _tasksFuture;
   int _tabIndex = 0;
   DateTime _calendarDate = DateTime.now();
+  DateTime _weekStart = _startOfWeek(DateTime.now());
   _TaskBoardTab _taskBoardTab = _TaskBoardTab.assessment;
-  GeneratedTaskOutcome _activeOutcome = GeneratedTaskOutcome.done;
-  double _extraTimeIndex = 0;
-  String? _activeOccurrenceKey;
+  final Map<String, _TaskActionDraft> _taskActionDrafts = {};
   bool _isSavingGeneratedAction = false;
 
   bool _isActionable(TaskAssignment task) {
@@ -66,11 +93,18 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   }
 
   Future<_EmployeeTaskPayload> _loadTasks({bool forceRefresh = false}) async {
+    final visibleWeekStart = _dateOnly(_weekStart);
+    final visibleWeekEnd = visibleWeekStart.add(const Duration(days: 6));
     final results = await Future.wait<dynamic>([
       widget.service.fetchAssignmentsForCurrentEmployee(forceRefresh: forceRefresh),
       widget.service.fetchCurrentEmployeeGeneratedTasks(forceRefresh: forceRefresh),
       widget.service.fetchCurrentEmployeeGeneratedTaskLogs(
         workDate: DateTime.now(),
+        forceRefresh: forceRefresh,
+      ),
+      widget.service.fetchCurrentEmployeeGeneratedTaskLogsRange(
+        startDate: visibleWeekStart,
+        endDate: visibleWeekEnd,
         forceRefresh: forceRefresh,
       ),
     ]);
@@ -79,6 +113,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       tasks: results[0] as List<TaskAssignment>,
       generatedTasks: results[1] as List<GeneratedTaskItem>,
       todayTaskActionLogs: results[2] as List<GeneratedTaskActionLog>,
+      visibleWeekTaskActionLogs: results[3] as List<GeneratedTaskActionLog>,
     );
   }
 
@@ -111,10 +146,6 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
 
   int _totalMinutesForDay(List<_PlannedTaskOccurrence> items) {
     return items.fold<int>(0, (sum, item) => sum + item.item.estimatedMinutes);
-  }
-
-  int _extraMinutesValue() {
-    return _extraTimeMinuteSteps[_extraTimeIndex.round()];
   }
 
   Map<int, List<_PlannedTaskOccurrence>> _buildBalancedWeekSchedule(
@@ -244,46 +275,84 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         '${entry.item.priority}|${entry.item.estimatedMinutes}';
   }
 
-  List<_PlannedTaskOccurrence> _filterCompletedOccurrencesForToday(
+  List<_TaskProgressState> _buildTaskProgressStates(
     List<_PlannedTaskOccurrence> source,
     List<GeneratedTaskActionLog> logs,
   ) {
-    final remainingByKey = <String, int>{};
+    final logsByKey = <String, List<GeneratedTaskActionLog>>{};
     for (final log in logs) {
       final key = '${log.categoryTitle.trim().toLowerCase()}|'
           '${log.prompt.trim().toLowerCase()}|'
           '${log.originalWeekday}|${log.scheduledWeekday}|'
           '${log.priority}|${log.estimatedMinutes}';
-      remainingByKey[key] = (remainingByKey[key] ?? 0) + 1;
+      logsByKey.putIfAbsent(key, () => <GeneratedTaskActionLog>[]).add(log);
     }
 
-    final result = <_PlannedTaskOccurrence>[];
+    final result = <_TaskProgressState>[];
     for (final entry in source) {
       final key = _occurrenceKey(entry);
-      final used = remainingByKey[key] ?? 0;
-      if (used > 0) {
-        remainingByKey[key] = used - 1;
-        continue;
-      }
-      result.add(entry);
+      final matching = logsByKey[key];
+      final completed = matching != null && matching.isNotEmpty;
+      final log = completed ? matching.removeAt(0) : null;
+      result.add(
+        _TaskProgressState(
+          key: key,
+          entry: entry,
+          completed: completed,
+          latestLog: log,
+        ),
+      );
     }
     return result;
   }
 
-  void _syncActiveOccurrenceState(_PlannedTaskOccurrence active) {
-    final key = _occurrenceKey(active);
-    if (_activeOccurrenceKey == key) {
-      return;
-    }
-    _activeOccurrenceKey = key;
-    _activeOutcome = GeneratedTaskOutcome.done;
-    _extraTimeIndex = 0;
+  List<GeneratedTaskActionLog> _logsForDate(
+    List<GeneratedTaskActionLog> logs,
+    DateTime date,
+  ) {
+    final dateOnly = _dateOnly(date);
+    return logs
+        .where((log) => _dateOnly(log.workDate) == dateOnly)
+        .toList()
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
   }
 
-  Future<void> _submitTopGeneratedTask(
+  void _toggleOutcomeSelection(String key, GeneratedTaskOutcome outcome) {
+    setState(() {
+      final current = _taskActionDrafts[key];
+      if (current != null && current.outcome == outcome) {
+        _taskActionDrafts.remove(key);
+        return;
+      }
+      _taskActionDrafts[key] = _TaskActionDraft(
+        outcome: outcome,
+        extraIndex: current?.extraIndex ?? 0,
+      );
+    });
+  }
+
+  void _updateExtraIndex(String key, double value) {
+    setState(() {
+      final current = _taskActionDrafts[key];
+      if (current == null) {
+        _taskActionDrafts[key] = _TaskActionDraft(
+          outcome: GeneratedTaskOutcome.needsMoreTime,
+          extraIndex: value,
+        );
+      } else {
+        _taskActionDrafts[key] = _TaskActionDraft(
+          outcome: current.outcome,
+          extraIndex: value,
+        );
+      }
+    });
+  }
+
+  Future<void> _submitGeneratedTask(
     _PlannedTaskOccurrence entry,
+    _TaskActionDraft draft,
   ) async {
-    if (_isSavingGeneratedAction) {
+    if (_isSavingGeneratedAction || draft.outcome == null) {
       return;
     }
 
@@ -296,9 +365,9 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         originalWeekday: entry.originalWeekday,
         priority: entry.item.priority,
         estimatedMinutes: entry.item.estimatedMinutes,
-        outcome: _activeOutcome,
-        extraMinutes: _activeOutcome == GeneratedTaskOutcome.needsMoreTime
-            ? _extraMinutesValue()
+        outcome: draft.outcome!,
+        extraMinutes: draft.outcome == GeneratedTaskOutcome.needsMoreTime
+            ? _extraTimeMinuteSteps[draft.extraIndex.round()]
             : null,
         workDate: DateTime.now(),
       );
@@ -307,6 +376,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         return;
       }
 
+      _taskActionDrafts.remove(_occurrenceKey(entry));
       await _reload();
     } catch (error) {
       if (!mounted) {
@@ -322,35 +392,86 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
     }
   }
 
-  Widget _buildGeneratedTaskCard(_PlannedTaskOccurrence entry) {
+  Widget _buildCalendarTaskCard(_TaskProgressState state) {
+    final entry = state.entry;
     final item = entry.item;
-    final weekdaysLabel = item.weekdays.map(weekdayShortLabel).join(', ');
     final shifted = entry.originalWeekday != entry.scheduledWeekday;
+    final bgColor = state.completed ? const Color(0xFFEAF7EE) : null;
+    final borderColor = state.completed ? const Color(0xFF62B77A) : null;
     return Card(
+      color: bgColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: borderColor == null
+            ? BorderSide.none
+            : BorderSide(color: borderColor, width: 1.2),
+      ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        isThreeLine: true,
         title: Text(
           item.prompt,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        subtitle: Text(
-          shifted
-              ? '${item.categoryTitle} • ${formatDurationMinutes(item.estimatedMinutes)} • shifted from ${weekdayShortLabel(entry.originalWeekday)}'
-              : '${item.categoryTitle} • $weekdaysLabel • ${formatDurationMinutes(item.estimatedMinutes)}',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              shifted
+                  ? '${item.categoryTitle} • ${formatDurationMinutes(item.estimatedMinutes)} • shifted from ${weekdayShortLabel(entry.originalWeekday)}'
+                  : '${item.categoryTitle} • ${formatDurationMinutes(item.estimatedMinutes)}',
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                Chip(label: Text('Priority ${item.priority}')),
+                Chip(
+                  label: Text(state.completed ? 'Completed' : 'Pending'),
+                  backgroundColor: state.completed
+                      ? const Color(0xFFD6F0DC)
+                      : null,
+                ),
+              ],
+            ),
+          ],
         ),
-        trailing: Chip(label: Text('P${item.priority}')),
+        trailing: state.completed
+            ? Text(
+                _formatClock(state.latestLog?.submittedAt ?? DateTime.now()),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : null,
       ),
     );
   }
 
-  Widget _buildTopActionCard(_PlannedTaskOccurrence entry) {
+  Widget _buildTasksExecutionCard(_TaskProgressState state) {
+    final entry = state.entry;
     final item = entry.item;
+    final draft = _taskActionDrafts[state.key];
+    final selectedOutcome = draft?.outcome;
     final shifted = entry.originalWeekday != entry.scheduledWeekday;
+
+    final completedColor = state.completed ? const Color(0xFFEAF7EE) : null;
+    final completedBorder = state.completed ? const Color(0xFF62B77A) : null;
+
     return Card(
+      color: completedColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: completedBorder == null
+            ? BorderSide.none
+            : BorderSide(color: completedBorder, width: 1.2),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -359,10 +480,10 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                 Expanded(
                   child: Text(
                     item.prompt,
-                    style: Theme.of(context).textTheme.headlineSmall,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-                Chip(label: Text('P${item.priority}')),
+                Chip(label: Text('Priority ${item.priority}')),
               ],
             ),
             const SizedBox(height: 6),
@@ -374,84 +495,101 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             ),
             Text(
               'Estimated: ${formatDurationMinutes(item.estimatedMinutes)}',
-              style: Theme.of(context).textTheme.bodyLarge,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _OutcomeButton(
-                    label: 'Completed',
-                    selected: _activeOutcome == GeneratedTaskOutcome.done,
-                    onPressed: () {
-                      setState(
-                        () => _activeOutcome = GeneratedTaskOutcome.done,
-                      );
-                    },
-                  ),
+            if (state.completed) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Completed at ${formatDateTime(state.latestLog?.submittedAt ?? DateTime.now())}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1B5E20),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _OutcomeButton(
-                    label: 'Not Completed',
-                    selected: _activeOutcome == GeneratedTaskOutcome.notDone,
-                    onPressed: () {
-                      setState(
-                        () => _activeOutcome = GeneratedTaskOutcome.notDone,
-                      );
-                    },
+              ),
+            ] else ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _OutcomeButton(
+                      label: 'Completed',
+                      selected: selectedOutcome == GeneratedTaskOutcome.done,
+                      onPressed: () {
+                        _toggleOutcomeSelection(
+                          state.key,
+                          GeneratedTaskOutcome.done,
+                        );
+                      },
+                    ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _OutcomeButton(
+                      label: 'Not Completed',
+                      selected:
+                          selectedOutcome == GeneratedTaskOutcome.notDone,
+                      onPressed: () {
+                        _toggleOutcomeSelection(
+                          state.key,
+                          GeneratedTaskOutcome.notDone,
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _OutcomeButton(
+                      label: 'Needs More Time',
+                      selected:
+                          selectedOutcome ==
+                          GeneratedTaskOutcome.needsMoreTime,
+                      onPressed: () {
+                        _toggleOutcomeSelection(
+                          state.key,
+                          GeneratedTaskOutcome.needsMoreTime,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              if (selectedOutcome == GeneratedTaskOutcome.needsMoreTime) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'More time needed: ${formatDurationMinutes(_extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0])}',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _OutcomeButton(
-                    label: 'Needs More Time',
-                    selected:
-                        _activeOutcome == GeneratedTaskOutcome.needsMoreTime,
-                    onPressed: () {
-                      setState(
-                        () =>
-                            _activeOutcome = GeneratedTaskOutcome.needsMoreTime,
-                      );
-                    },
+                Slider(
+                  value: draft?.extraIndex ?? 0,
+                  min: 0,
+                  max: (_extraTimeMinuteSteps.length - 1).toDouble(),
+                  divisions: _extraTimeMinuteSteps.length - 1,
+                  label: formatDurationMinutes(
+                    _extraTimeMinuteSteps[draft?.extraIndex.round() ?? 0],
+                  ),
+                  onChanged: (value) => _updateExtraIndex(state.key, value),
+                ),
+              ],
+              if (selectedOutcome != null) ...[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 46),
+                  ),
+                  onPressed: _isSavingGeneratedAction
+                      ? null
+                      : () => _submitGeneratedTask(entry, draft!),
+                  icon: const Icon(Icons.check),
+                  label: Text(
+                    _isSavingGeneratedAction ? 'Saving...' : 'Save and Next',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
-            ),
-            if (_activeOutcome == GeneratedTaskOutcome.needsMoreTime) ...[
-              const SizedBox(height: 10),
-              Text(
-                'More time needed: ${formatDurationMinutes(_extraMinutesValue())}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              Slider(
-                value: _extraTimeIndex,
-                min: 0,
-                max: (_extraTimeMinuteSteps.length - 1).toDouble(),
-                divisions: _extraTimeMinuteSteps.length - 1,
-                label: formatDurationMinutes(_extraMinutesValue()),
-                onChanged: (value) {
-                  setState(() => _extraTimeIndex = value);
-                },
-              ),
             ],
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(double.infinity, 52),
-              ),
-              onPressed: _isSavingGeneratedAction
-                  ? null
-                  : () => _submitTopGeneratedTask(entry),
-              icon: const Icon(Icons.check),
-              label: Text(
-                _isSavingGeneratedAction ? 'Saving...' : 'Save and Next',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -504,22 +642,36 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   Widget _buildTaskTab(_EmployeeTaskPayload payload) {
     final assessments = _buildAssessments(payload);
     final weekday = DateTime.now().weekday;
+    final weekdayLabel = _weekdayLongLabel(weekday);
     final balanced = _buildBalancedWeekSchedule(payload.generatedTasks);
     final generated = balanced[weekday] ?? const <_PlannedTaskOccurrence>[];
-    final pendingGenerated = _filterCompletedOccurrencesForToday(
+    final progressStates = _buildTaskProgressStates(
       generated,
       payload.todayTaskActionLogs,
     );
     final isAssessment = _taskBoardTab == _TaskBoardTab.assessment;
+    final completedCount = progressStates.where((state) => state.completed).length;
+    final percentCompleted = progressStates.isEmpty
+        ? 0
+        : ((completedCount / progressStates.length) * 100).round();
+    final totalMinutes = _totalMinutesForDay(generated);
 
     final children = <Widget>[
       Text(
         isAssessment
             ? 'Assessment forms'
-            : '${weekdayShortLabel(weekday)} tasks '
-                '(${formatDurationMinutes(_totalMinutesForDay(pendingGenerated))}/8h)',
-        style: Theme.of(context).textTheme.headlineSmall,
+            : '$weekdayLabel • ${formatDurationMinutes(totalMinutes)} total',
+        style: Theme.of(context).textTheme.titleLarge,
       ),
+      if (!isAssessment) ...[
+        const SizedBox(height: 4),
+        Text(
+          '$percentCompleted% completed ($completedCount/${progressStates.length})',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
       const SizedBox(height: 10),
     ];
 
@@ -540,7 +692,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         }
       }
     } else {
-      if (pendingGenerated.isEmpty) {
+      if (progressStates.isEmpty) {
         children.add(
           Card(
             child: Padding(
@@ -553,9 +705,10 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
           ),
         );
       } else {
-        final top = pendingGenerated.first;
-        _syncActiveOccurrenceState(top);
-        children.add(_buildTopActionCard(top));
+        for (final state in progressStates) {
+          children.add(_buildTasksExecutionCard(state));
+          children.add(const SizedBox(height: 10));
+        }
       }
     }
 
@@ -563,34 +716,112 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   }
 
   Widget _buildCalendarTab(_EmployeeTaskPayload payload) {
-    final selectedWeekday = _calendarDate.weekday;
+    final selectedDate = _dateOnly(_calendarDate);
+    final weekDates = List.generate(
+      7,
+      (index) => _weekStart.add(Duration(days: index)),
+    );
+    final selectedWeekday = selectedDate.weekday;
     final balanced = _buildBalancedWeekSchedule(payload.generatedTasks);
     final generated = balanced[selectedWeekday] ?? const <_PlannedTaskOccurrence>[];
+    final selectedDayLogs = _logsForDate(payload.visibleWeekTaskActionLogs, selectedDate);
+    final calendarStates = _buildTaskProgressStates(
+      generated,
+      selectedDayLogs,
+    );
+
+    var weekTotalMinutes = 0;
+    var weekDoneMinutes = 0;
+    for (final date in weekDates) {
+      final dayItems = balanced[date.weekday] ?? const <_PlannedTaskOccurrence>[];
+      final dayLogs = _logsForDate(payload.visibleWeekTaskActionLogs, date);
+      final dayStates = _buildTaskProgressStates(dayItems, dayLogs);
+      weekTotalMinutes += _totalMinutesForDay(dayItems);
+      weekDoneMinutes += dayStates
+          .where((state) => state.completed)
+          .fold<int>(0, (sum, state) => sum + state.entry.item.estimatedMinutes);
+    }
 
     final children = <Widget>[
       Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: CalendarDatePicker(
-            initialDate: _calendarDate,
-            firstDate: DateTime.now().subtract(const Duration(days: 365)),
-            lastDate: DateTime.now().add(const Duration(days: 365)),
-            onDateChanged: (value) {
-              setState(() => _calendarDate = value);
-            },
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _weekStart = _weekStart.subtract(const Duration(days: 7));
+                        _calendarDate = _weekStart;
+                        _tasksFuture = _loadTasks(forceRefresh: true);
+                      });
+                    },
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '${_weekStart.month}/${_weekStart.day} - ${_weekStart.add(const Duration(days: 6)).month}/${_weekStart.add(const Duration(days: 6)).day}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _weekStart = _weekStart.add(const Duration(days: 7));
+                        _calendarDate = _weekStart;
+                        _tasksFuture = _loadTasks(forceRefresh: true);
+                      });
+                    },
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final date in weekDates)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: _WeekDayTile(
+                          date: date,
+                          selected: date == selectedDate,
+                          totalMinutes:
+                              _totalMinutesForDay(
+                                balanced[date.weekday] ??
+                                    const <_PlannedTaskOccurrence>[],
+                              ),
+                          onTap: () {
+                            setState(() => _calendarDate = date);
+                          },
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
       const SizedBox(height: 10),
       Text(
-        '${weekdayShortLabel(selectedWeekday)} tasks '
-            '(${formatDurationMinutes(_totalMinutesForDay(generated))}/8h)',
-        style: Theme.of(context).textTheme.headlineSmall,
+        '${_weekdayLongLabel(selectedWeekday)} • ${formatDurationMinutes(_totalMinutesForDay(generated))} total',
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+      const SizedBox(height: 4),
+      Text(
+        'Week total: ${formatDurationMinutes(weekTotalMinutes)} • Done: ${formatDurationMinutes(weekDoneMinutes)}',
+        style: Theme.of(context).textTheme.titleMedium,
       ),
       const SizedBox(height: 8),
     ];
 
-    if (generated.isEmpty) {
+    if (calendarStates.isEmpty) {
       children.add(
         Card(
           child: Padding(
@@ -602,8 +833,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         ),
       );
     } else {
-      for (final item in generated) {
-        children.add(_buildGeneratedTaskCard(item));
+      for (final state in calendarStates) {
+        children.add(_buildCalendarTaskCard(state));
         children.add(const SizedBox(height: 8));
       }
     }
@@ -657,6 +888,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
                   tasks: <TaskAssignment>[],
                   generatedTasks: <GeneratedTaskItem>[],
                   todayTaskActionLogs: <GeneratedTaskActionLog>[],
+                  visibleWeekTaskActionLogs: <GeneratedTaskActionLog>[],
                 );
 
             if (_tabIndex == 1) {
@@ -712,11 +944,13 @@ class _EmployeeTaskPayload {
     required this.tasks,
     required this.generatedTasks,
     required this.todayTaskActionLogs,
+    required this.visibleWeekTaskActionLogs,
   });
 
   final List<TaskAssignment> tasks;
   final List<GeneratedTaskItem> generatedTasks;
   final List<GeneratedTaskActionLog> todayTaskActionLogs;
+  final List<GeneratedTaskActionLog> visibleWeekTaskActionLogs;
 }
 
 enum _TaskBoardTab { assessment, tasks }
@@ -769,4 +1003,86 @@ class _PlannedTaskOccurrence {
   final GeneratedTaskItem item;
   final int originalWeekday;
   final int scheduledWeekday;
+}
+
+class _TaskProgressState {
+  const _TaskProgressState({
+    required this.key,
+    required this.entry,
+    required this.completed,
+    this.latestLog,
+  });
+
+  final String key;
+  final _PlannedTaskOccurrence entry;
+  final bool completed;
+  final GeneratedTaskActionLog? latestLog;
+}
+
+class _TaskActionDraft {
+  const _TaskActionDraft({required this.outcome, required this.extraIndex});
+
+  final GeneratedTaskOutcome? outcome;
+  final double extraIndex;
+}
+
+class _WeekDayTile extends StatelessWidget {
+  const _WeekDayTile({
+    required this.date,
+    required this.selected,
+    required this.totalMinutes,
+    required this.onTap,
+  });
+
+  final DateTime date;
+  final bool selected;
+  final int totalMinutes;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected ? const Color(0xFF1C4A2A) : const Color(0xFFF1F5EE);
+    final fg = selected ? Colors.white : const Color(0xFF203025);
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFC6D5C3)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              weekdayShortLabel(date.weekday),
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+            Text(
+              '${date.day}',
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
+              ),
+            ),
+            Text(
+              formatDurationMinutes(totalMinutes),
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
