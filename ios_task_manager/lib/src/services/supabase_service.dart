@@ -803,42 +803,97 @@ class SupabaseService {
       throw const AppException('You must be signed in.');
     }
 
-    final results = await Future.wait<dynamic>([
-      fetchAssignmentsForCurrentEmployee(forceRefresh: forceRefresh),
-      _client.from('assignment_questions').select(),
-      _client
+    const pageSize = 1000;
+    final answerRows = <Map<String, dynamic>>[];
+    var page = 0;
+    while (true) {
+      final from = page * pageSize;
+      final to = from + pageSize - 1;
+      final rows = await _client
           .from('question_answers')
           .select()
           .eq('employee_id', user.id)
-          .order('answered_at', ascending: false),
-    ]);
+          .order('answered_at', ascending: false)
+          .range(from, to);
 
-    final assignments = results[0] as List<TaskAssignment>;
-    final questionRows = results[1];
-    final answerRows = results[2];
+      final pageRows = (rows as List).cast<Map<String, dynamic>>();
+      if (pageRows.isEmpty) {
+        break;
+      }
+      answerRows.addAll(pageRows);
+      if (pageRows.length < pageSize) {
+        break;
+      }
+      page++;
+    }
 
-    final assignmentById = <String, TaskAssignment>{
-      for (final item in assignments) item.id: item,
-    };
-    final questionById = <String, AssignmentQuestion>{};
-    for (final row in (questionRows as List).cast<Map<String, dynamic>>()) {
-      final question = AssignmentQuestion.fromMap(row);
-      questionById[question.id] = question;
+    final assignmentIds = <String>{};
+    final questionIds = <String>{};
+    for (final row in answerRows) {
+      final assignmentId = row['assignment_id'] as String?;
+      final questionId = row['question_id'] as String?;
+      if (assignmentId != null && assignmentId.isNotEmpty) {
+        assignmentIds.add(assignmentId);
+      }
+      if (questionId != null && questionId.isNotEmpty) {
+        questionIds.add(questionId);
+      }
+    }
+
+    final assignmentTitlesById = <String, String>{};
+    final assignmentIdList = assignmentIds.toList();
+    for (var i = 0; i < assignmentIdList.length; i += 200) {
+      final end = (i + 200 < assignmentIdList.length)
+          ? i + 200
+          : assignmentIdList.length;
+      final chunk = assignmentIdList.sublist(i, end);
+      final rows = await _client
+          .from('task_assignments')
+          .select('id,title,employee_id')
+          .eq('employee_id', user.id)
+          .inFilter('id', chunk);
+      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+        final id = row['id'] as String?;
+        if (id == null || id.isEmpty) {
+          continue;
+        }
+        assignmentTitlesById[id] = row['title'] as String? ?? '';
+      }
+    }
+
+    final questionPromptsById = <String, String>{};
+    final questionIdList = questionIds.toList();
+    for (var i = 0; i < questionIdList.length; i += 200) {
+      final end = (i + 200 < questionIdList.length)
+          ? i + 200
+          : questionIdList.length;
+      final chunk = questionIdList.sublist(i, end);
+      final rows = await _client
+          .from('assignment_questions')
+          .select('id,prompt')
+          .inFilter('id', chunk);
+      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+        final id = row['id'] as String?;
+        if (id == null || id.isEmpty) {
+          continue;
+        }
+        questionPromptsById[id] = row['prompt'] as String? ?? '';
+      }
     }
 
     final latestByQuestion = <String, GeneratedTaskItem>{};
-    for (final row in (answerRows as List).cast<Map<String, dynamic>>()) {
+    for (final row in answerRows) {
       final answer = QuestionAnswer.fromMap(row);
-      final question = questionById[answer.questionId];
-      if (question == null) {
+      final prompt = questionPromptsById[answer.questionId]?.trim() ?? '';
+      if (prompt.isEmpty) {
         continue;
       }
       final assignmentId = row['assignment_id'] as String?;
       if (assignmentId == null) {
         continue;
       }
-      final assignment = assignmentById[assignmentId];
-      if (assignment == null) {
+      final category = assignmentTitlesById[assignmentId]?.trim() ?? '';
+      if (category.isEmpty) {
         continue;
       }
 
@@ -847,11 +902,6 @@ class SupabaseService {
         continue;
       }
 
-      final category = assignment.title.trim();
-      final prompt = question.prompt.trim();
-      if (category.isEmpty || prompt.isEmpty) {
-        continue;
-      }
       final key = '${category.toLowerCase()}|${prompt.toLowerCase()}';
       latestByQuestion.putIfAbsent(
         key,
