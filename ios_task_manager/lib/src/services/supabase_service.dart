@@ -9,6 +9,7 @@ const _checkYesDetailsPrefix = '__meta:check_yes_details:';
 const _defaultCacheTtl = Duration(seconds: 30);
 const _dismissedAlertKeysStorageKey = 'dismissed_flagged_alert_keys_v1';
 const _generatedTaskActionsTable = 'generated_task_actions';
+const _generatedTaskReassignmentsTable = 'generated_task_reassignments';
 
 class AppException implements Exception {
   const AppException(this.message);
@@ -33,6 +34,8 @@ class SupabaseService {
   _generatedTaskLogsByDateCache = {};
   final Map<String, _TimedValue<List<GeneratedTaskActionLog>>>
   _generatedTaskLogsByRangeCache = {};
+  final Map<String, _TimedValue<List<GeneratedTaskReassignment>>>
+  _generatedTaskReassignmentsByWeekCache = {};
 
   _TimedValue<List<Profile>>? _allUsersCache;
   _TimedValue<List<Profile>>? _employeesOnlyCache;
@@ -105,11 +108,15 @@ class SupabaseService {
     if (clearAllEmployeeAssignments) {
       _generatedTaskLogsByDateCache.clear();
       _generatedTaskLogsByRangeCache.clear();
+      _generatedTaskReassignmentsByWeekCache.clear();
     } else if (employeeId != null) {
       _generatedTaskLogsByDateCache.removeWhere(
         (key, _) => key.startsWith('$employeeId|'),
       );
       _generatedTaskLogsByRangeCache.removeWhere(
+        (key, _) => key.startsWith('$employeeId|'),
+      );
+      _generatedTaskReassignmentsByWeekCache.removeWhere(
         (key, _) => key.startsWith('$employeeId|'),
       );
     }
@@ -127,6 +134,7 @@ class SupabaseService {
     _answersByAssignmentAndEmployeeCache.clear();
     _generatedTaskLogsByDateCache.clear();
     _generatedTaskLogsByRangeCache.clear();
+    _generatedTaskReassignmentsByWeekCache.clear();
   }
 
   Future<Profile?> fetchCurrentProfile() async {
@@ -744,7 +752,9 @@ class SupabaseService {
     }
 
     final targetWeekday = weekday ?? DateTime.now().weekday;
-    final entries = await fetchDashboardAnswerEntries(forceRefresh: forceRefresh);
+    final entries = await fetchDashboardAnswerEntries(
+      forceRefresh: forceRefresh,
+    );
     final byTaskTitle = <String, TaskPriorityHint>{};
 
     for (final entry in entries) {
@@ -1074,6 +1084,95 @@ class SupabaseService {
     }
   }
 
+  Future<List<GeneratedTaskReassignment>>
+  fetchCurrentEmployeeGeneratedTaskReassignmentsForWeek({
+    required DateTime weekStartDate,
+    bool forceRefresh = false,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+
+    final weekKey = _dateOnlyKey(weekStartDate);
+    final cacheKey = '${user.id}|$weekKey';
+    final cached = _generatedTaskReassignmentsByWeekCache[cacheKey];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
+    try {
+      final rows = await _client
+          .from(_generatedTaskReassignmentsTable)
+          .select()
+          .eq('employee_id', user.id)
+          .eq('week_start_date', weekKey)
+          .order('created_at', ascending: true);
+
+      final result = (rows as List)
+          .cast<Map<String, dynamic>>()
+          .map(GeneratedTaskReassignment.fromMap)
+          .toList();
+      _generatedTaskReassignmentsByWeekCache[cacheKey] = _TimedValue(result);
+      return result;
+    } on PostgrestException catch (error) {
+      if (_isGeneratedTaskReassignmentsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for generated_task_reassignments before using Add Priority 5 tasks.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
+  Future<void> saveGeneratedTaskReassignments({
+    required DateTime weekStartDate,
+    required List<GeneratedTaskReassignmentDraft> reassignments,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+    if (reassignments.isEmpty) {
+      return;
+    }
+
+    final weekKey = _dateOnlyKey(weekStartDate);
+    final payload = reassignments
+        .map(
+          (entry) => <String, dynamic>{
+            'employee_id': user.id,
+            'category_title': entry.categoryTitle.trim(),
+            'prompt': entry.prompt.trim(),
+            'original_weekday': entry.originalWeekday,
+            'from_scheduled_weekday': entry.fromScheduledWeekday,
+            'target_weekday': entry.targetWeekday,
+            'priority': entry.priority,
+            'estimated_minutes': entry.estimatedMinutes,
+            'week_start_date': weekKey,
+          },
+        )
+        .toList();
+
+    try {
+      await _client
+          .from(_generatedTaskReassignmentsTable)
+          .upsert(
+            payload,
+            onConflict:
+                'employee_id,week_start_date,category_title,prompt,original_weekday,from_scheduled_weekday,target_weekday,priority,estimated_minutes',
+          );
+      _generatedTaskReassignmentsByWeekCache.remove('${user.id}|$weekKey');
+    } on PostgrestException catch (error) {
+      if (_isGeneratedTaskReassignmentsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for generated_task_reassignments before using Add Priority 5 tasks.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
   Future<List<FlaggedTaskAlert>> fetchFlaggedTaskAlerts({
     bool forceRefresh = false,
   }) async {
@@ -1229,6 +1328,14 @@ class SupabaseService {
   bool _isGeneratedTaskActionsTableMissing(String message) {
     final lower = message.toLowerCase();
     return lower.contains('generated_task_actions') &&
+        (lower.contains('does not exist') ||
+            lower.contains('schema cache') ||
+            lower.contains('relation'));
+  }
+
+  bool _isGeneratedTaskReassignmentsTableMissing(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('generated_task_reassignments') &&
         (lower.contains('does not exist') ||
             lower.contains('schema cache') ||
             lower.contains('relation'));

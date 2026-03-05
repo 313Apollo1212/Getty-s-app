@@ -176,13 +176,14 @@ class CheckAnswerValue {
     int? priority;
 
     if (segments.length >= 2) {
-      weekdays = segments[1]
-          .split(',')
-          .map((entry) => weekdayFromShortLabel(entry))
-          .whereType<int>()
-          .toSet()
-          .toList()
-        ..sort();
+      weekdays =
+          segments[1]
+              .split(',')
+              .map((entry) => weekdayFromShortLabel(entry))
+              .whereType<int>()
+              .toSet()
+              .toList()
+            ..sort();
     }
     if (segments.length >= 3) {
       final minutesMatch = RegExp(r'(\d+)').firstMatch(segments[2]);
@@ -316,6 +317,71 @@ class GeneratedTaskActionLog {
       submittedAt: DateTime.parse(map['submitted_at'] as String),
     );
   }
+}
+
+class GeneratedTaskReassignment {
+  const GeneratedTaskReassignment({
+    required this.id,
+    required this.employeeId,
+    required this.categoryTitle,
+    required this.prompt,
+    required this.originalWeekday,
+    required this.fromScheduledWeekday,
+    required this.targetWeekday,
+    required this.priority,
+    required this.estimatedMinutes,
+    required this.weekStartDate,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String employeeId;
+  final String categoryTitle;
+  final String prompt;
+  final int originalWeekday;
+  final int fromScheduledWeekday;
+  final int targetWeekday;
+  final int priority;
+  final int estimatedMinutes;
+  final DateTime weekStartDate;
+  final DateTime createdAt;
+
+  factory GeneratedTaskReassignment.fromMap(Map<String, dynamic> map) {
+    return GeneratedTaskReassignment(
+      id: map['id'] as String,
+      employeeId: map['employee_id'] as String,
+      categoryTitle: map['category_title'] as String? ?? '',
+      prompt: map['prompt'] as String? ?? '',
+      originalWeekday: (map['original_weekday'] as num?)?.toInt() ?? 1,
+      fromScheduledWeekday:
+          (map['from_scheduled_weekday'] as num?)?.toInt() ?? 1,
+      targetWeekday: (map['target_weekday'] as num?)?.toInt() ?? 1,
+      priority: (map['priority'] as num?)?.toInt() ?? 5,
+      estimatedMinutes: (map['estimated_minutes'] as num?)?.toInt() ?? 0,
+      weekStartDate: DateTime.parse(map['week_start_date'] as String),
+      createdAt: DateTime.parse(map['created_at'] as String),
+    );
+  }
+}
+
+class GeneratedTaskReassignmentDraft {
+  const GeneratedTaskReassignmentDraft({
+    required this.categoryTitle,
+    required this.prompt,
+    required this.originalWeekday,
+    required this.fromScheduledWeekday,
+    required this.targetWeekday,
+    required this.priority,
+    required this.estimatedMinutes,
+  });
+
+  final String categoryTitle;
+  final String prompt;
+  final int originalWeekday;
+  final int fromScheduledWeekday;
+  final int targetWeekday;
+  final int priority;
+  final int estimatedMinutes;
 }
 
 class TaskAssignment {
