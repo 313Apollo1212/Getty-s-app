@@ -56,6 +56,15 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
   bool get _isEdit => widget.existingAssignment != null;
 
+  String get _itemNoun =>
+      _editorKind == AssignmentKind.assessment ? 'assessment' : 'task';
+
+  String get _itemNounPlural =>
+      _editorKind == AssignmentKind.assessment ? 'assessments' : 'tasks';
+
+  String get _itemNounTitle =>
+      _editorKind == AssignmentKind.assessment ? 'Assessment' : 'Task';
+
   @override
   void initState() {
     super.initState();
@@ -102,6 +111,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
             options: row.dropdownOptions.join(', '),
             unwantedAnswer: row.unwantedAnswer ?? '',
             requiresYesDetails: row.requiresYesDetails,
+            defaultPriority: row.defaultPriority,
           ),
         );
       }
@@ -409,6 +419,12 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
               ? unwantedAnswer
               : null,
           requiresYesDetails: question.requiresYesDetails,
+          defaultPriority:
+              question.type == QuestionInputType.check &&
+                  question.requiresYesDetails &&
+                  question.useDefaultPriority
+              ? question.defaultPriority
+              : null,
         ),
       );
     }
@@ -478,9 +494,9 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
         final schedule = _buildRecurringSchedule();
         if (schedule.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'This schedule creates zero tasks. Adjust weekdays/date range.',
+                'This schedule creates zero $_itemNounPlural. Adjust weekdays/date range.',
               ),
             ),
           );
@@ -512,9 +528,9 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
         if (createdCount == 0) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'No tasks were created. Check show/expected times and schedule.',
+                'No $_itemNounPlural were created. Check show/expected times and schedule.',
               ),
             ),
           );
@@ -528,9 +544,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
       }
 
       if (!_isEdit && _scheduleMode == _ScheduleMode.weekdays) {
-        final itemLabel = _editorKind == AssignmentKind.task
-            ? 'tasks'
-            : 'assessments';
+        final itemLabel = _itemNounPlural;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -588,8 +602,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
 
   Widget _buildBasicsSection(List<Profile> employees) {
     return _SectionCard(
-      title: '1. Task Details',
-      subtitle: 'Pick who gets this task and what they need to do.',
+      title: '1. $_itemNounTitle Details',
+      subtitle: 'Pick who gets this $_itemNoun and what they need to do.',
       child: Column(
         children: [
           DropdownButtonFormField<String>(
@@ -612,7 +626,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
           const SizedBox(height: 10),
           TextFormField(
             controller: _titleController,
-            decoration: const InputDecoration(labelText: 'Task Title'),
+            decoration: InputDecoration(labelText: '$_itemNounTitle Title'),
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'Title is required.';
@@ -645,7 +659,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
       children: [
         _DateTimeFieldTile(
           icon: Icons.visibility_outlined,
-          title: 'Show task to employee',
+          title: 'Show $_itemNoun to employee',
           value: formatDateTime(_showAt),
           onTap: _pickShowDateTime,
         ),
@@ -865,10 +879,10 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
                 const SizedBox(height: 4),
                 Text(
                   _recurringStopMode == _RecurringStopMode.endDate
-                      ? 'Will create $recurringCount task${recurringCount == 1 ? '' : 's'} in this range.'
+                      ? 'Will create $recurringCount ${recurringCount == 1 ? _itemNoun : _itemNounPlural} in this range.'
                       : usesCap
-                      ? 'Creating $recurringCount upcoming tasks now. This will keep repeating weekly until stopped.'
-                      : 'Will create $recurringCount upcoming tasks and keep repeating weekly until stopped.',
+                      ? 'Creating $recurringCount upcoming $_itemNounPlural now. This will keep repeating weekly until stopped.'
+                      : 'Will create $recurringCount upcoming $_itemNounPlural and keep repeating weekly until stopped.',
                   style: const TextStyle(
                     color: Color(0xFF121A0F),
                     fontWeight: FontWeight.w600,
@@ -885,7 +899,7 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
   Widget _buildScheduleSection(int recurringCount) {
     return _SectionCard(
       title: '2. Schedule',
-      subtitle: 'When the task appears and when the answer is expected.',
+      subtitle: 'When the $_itemNoun appears and when the answer is expected.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -925,7 +939,8 @@ class _TaskEditorScreenState extends State<TaskEditorScreen> {
       children: [
         _SectionCard(
           title: '3. Questions',
-          subtitle: 'Add the questions employees will answer for this task.',
+          subtitle:
+              'Add the questions employees will answer for this $_itemNoun.',
           trailing: FilledButton.tonalIcon(
             onPressed: _addQuestion,
             icon: const Icon(Icons.add_circle_outline),
@@ -1130,10 +1145,18 @@ class _QuestionDraftForm {
     String options = '',
     String unwantedAnswer = '',
     this.requiresYesDetails = false,
+    int? defaultPriority,
   }) : promptController = TextEditingController(text: prompt),
        optionsController = TextEditingController(text: options),
        unwantedAnswerController = TextEditingController(text: unwantedAnswer),
-       notifyOnUnwantedAnswer = unwantedAnswer.trim().isNotEmpty;
+       notifyOnUnwantedAnswer = unwantedAnswer.trim().isNotEmpty,
+       defaultPriority =
+           (defaultPriority != null &&
+               defaultPriority >= 1 &&
+               defaultPriority <= 5)
+           ? defaultPriority
+           : 3,
+       useDefaultPriority = defaultPriority != null;
 
   final TextEditingController promptController;
   final TextEditingController optionsController;
@@ -1141,6 +1164,8 @@ class _QuestionDraftForm {
   QuestionInputType type;
   bool notifyOnUnwantedAnswer;
   bool requiresYesDetails;
+  bool useDefaultPriority;
+  int defaultPriority;
 
   void dispose() {
     promptController.dispose();
@@ -1167,6 +1192,26 @@ class _QuestionCard extends StatefulWidget {
 }
 
 class _QuestionCardState extends State<_QuestionCard> {
+  Color _priorityColor(int value) {
+    return switch (value) {
+      1 => const Color(0xFFD32F2F),
+      2 => const Color(0xFFF57C00),
+      3 => const Color(0xFFFBC02D),
+      4 => const Color(0xFF7CB342),
+      _ => const Color(0xFF2E7D32),
+    };
+  }
+
+  Color _priorityTextColor(int value) {
+    if (value >= 4) {
+      return Colors.white;
+    }
+    if (value == 3) {
+      return Colors.black;
+    }
+    return Colors.white;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -1211,6 +1256,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                     widget.question.type = value;
                     if (value != QuestionInputType.check) {
                       widget.question.requiresYesDetails = false;
+                      widget.question.useDefaultPriority = false;
                     }
                   });
                 }
@@ -1244,9 +1290,99 @@ class _QuestionCardState extends State<_QuestionCard> {
                 onChanged: (value) {
                   setState(() {
                     widget.question.requiresYesDetails = value;
+                    if (!value) {
+                      widget.question.useDefaultPriority = false;
+                    }
                   });
                 },
               ),
+              if (widget.question.requiresYesDetails) ...[
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  value: widget.question.useDefaultPriority,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Set default priority (optional)',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'Preselects the 1-5 priority for employee yes-details.',
+                  ),
+                  onChanged: (value) {
+                    setState(() {
+                      widget.question.useDefaultPriority = value;
+                    });
+                  },
+                ),
+                if (widget.question.useDefaultPriority) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Default priority: ${widget.question.defaultPriority}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var value = 1; value <= 5; value++)
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            backgroundColor:
+                                widget.question.defaultPriority == value
+                                ? _priorityColor(value)
+                                : _priorityColor(value).withValues(alpha: 0.12),
+                            foregroundColor:
+                                widget.question.defaultPriority == value
+                                ? _priorityTextColor(value)
+                                : _priorityColor(value),
+                            side: BorderSide(
+                              color: _priorityColor(value),
+                              width: widget.question.defaultPriority == value
+                                  ? 2
+                                  : 1,
+                            ),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              widget.question.defaultPriority = value;
+                            });
+                          },
+                          child: Text(
+                            '$value',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F8EC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFD6E2C9)),
+                    ),
+                    child: const Text(
+                      'Priority scale: 1 = highest urgency, 2 = high, 3 = medium, 4 = low, 5 = lowest urgency.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ],
             const SizedBox(height: 8),
             SwitchListTile.adaptive(

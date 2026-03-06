@@ -6,6 +6,7 @@ import '../../services/supabase_service.dart';
 import '../../ui/app_theme.dart';
 import '../../utils/time_format.dart';
 import '../profile_screen.dart';
+import 'employee_questions_screen.dart';
 import 'task_submission_screen.dart';
 
 const _dailyCapacityMinutes = 8 * 60;
@@ -782,9 +783,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    item.prompt,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    item.categoryTitle,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
@@ -795,10 +794,12 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              item.categoryTitle,
+              item.prompt,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(
                 context,
-              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),
             Text(
@@ -864,7 +865,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    item.prompt,
+                    item.categoryTitle,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
@@ -875,10 +876,10 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              item.categoryTitle,
+              item.prompt,
               style: Theme.of(
                 context,
-              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),
             Text(
@@ -1002,7 +1003,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       segments: const [
         ButtonSegment<_TaskBoardTab>(
           value: _TaskBoardTab.assessment,
-          label: Text('Assessment'),
+          label: Text('Weekly Assessment'),
         ),
         ButtonSegment<_TaskBoardTab>(
           value: _TaskBoardTab.tasks,
@@ -1046,7 +1047,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
     final children = <Widget>[
       Text(
         isAssessment
-            ? 'Assessment forms'
+            ? 'Weekly assessment forms'
             : '$weekdayLabel • ${formatDurationMinutes(totalMinutes)} total',
         style: Theme.of(context).textTheme.titleLarge,
       ),
@@ -1280,8 +1281,11 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   }
 
   PreferredSizeWidget _buildAppBar() {
-    if (_tabIndex == 2) {
+    if (_tabIndex == 3) {
       return AppBar(centerTitle: true, title: const Text('Profile'));
+    }
+    if (_tabIndex == 2) {
+      return AppBar(centerTitle: true, title: const Text('Questions'));
     }
     if (_tabIndex == 1) {
       return AppBar(centerTitle: true, title: const Text('Calendar'));
@@ -1344,11 +1348,13 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _buildAppBar(),
-      body: _tabIndex == 2
+      body: _tabIndex == 3
           ? ProfileScreen(
               service: widget.service,
               currentUser: widget.currentUser,
             )
+          : _tabIndex == 2
+          ? EmployeeQuestionsScreen(service: widget.service)
           : _buildTasksAndCalendarTab(),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
@@ -1372,6 +1378,11 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             icon: Icon(Icons.calendar_month_outlined),
             selectedIcon: Icon(Icons.calendar_month),
             label: 'Calendar',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            selectedIcon: Icon(Icons.chat_bubble_rounded),
+            label: 'Questions',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

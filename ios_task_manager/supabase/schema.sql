@@ -88,8 +88,20 @@ create table if not exists public.generated_task_reassignments (
   )
 );
 
+create table if not exists public.employee_questions (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.profiles(id) on delete cascade,
+  admin_id uuid references public.profiles(id) on delete set null,
+  sender_id uuid not null references public.profiles(id) on delete cascade,
+  sender_role app_role not null,
+  message_text text not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists generated_task_reassignments_employee_week_idx
 on public.generated_task_reassignments (employee_id, week_start_date);
+create index if not exists employee_questions_employee_created_idx
+on public.employee_questions (employee_id, created_at);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -132,6 +144,7 @@ alter table public.assignment_questions enable row level security;
 alter table public.question_answers enable row level security;
 alter table public.generated_task_actions enable row level security;
 alter table public.generated_task_reassignments enable row level security;
+alter table public.employee_questions enable row level security;
 
 alter table public.task_assignments
 add column if not exists show_at timestamptz;
@@ -283,6 +296,48 @@ drop policy if exists generated_task_reassignments_delete_admin
 on public.generated_task_reassignments;
 create policy generated_task_reassignments_delete_admin
 on public.generated_task_reassignments
+for delete
+to authenticated
+using (public.is_admin());
+
+-- Employee questions
+drop policy if exists employee_questions_select_admin_or_owner
+on public.employee_questions;
+create policy employee_questions_select_admin_or_owner
+on public.employee_questions
+for select
+to authenticated
+using (public.is_admin() or employee_id = auth.uid());
+
+drop policy if exists employee_questions_insert_admin
+on public.employee_questions;
+create policy employee_questions_insert_admin
+on public.employee_questions
+for insert
+to authenticated
+with check (
+  public.is_admin()
+  and sender_role = 'admin'::app_role
+  and sender_id = auth.uid()
+  and admin_id = auth.uid()
+);
+
+drop policy if exists employee_questions_insert_employee
+on public.employee_questions;
+create policy employee_questions_insert_employee
+on public.employee_questions
+for insert
+to authenticated
+with check (
+  employee_id = auth.uid()
+  and sender_role = 'employee'::app_role
+  and sender_id = auth.uid()
+);
+
+drop policy if exists employee_questions_delete_admin
+on public.employee_questions;
+create policy employee_questions_delete_admin
+on public.employee_questions
 for delete
 to authenticated
 using (public.is_admin());

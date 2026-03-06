@@ -6,10 +6,12 @@ import '../models/task_models.dart';
 
 const _unwantedAnswerPrefix = '__meta:unwanted:';
 const _checkYesDetailsPrefix = '__meta:check_yes_details:';
+const _defaultPriorityPrefix = '__meta:default_priority:';
 const _defaultCacheTtl = Duration(seconds: 30);
 const _dismissedAlertKeysStorageKey = 'dismissed_flagged_alert_keys_v1';
 const _generatedTaskActionsTable = 'generated_task_actions';
 const _generatedTaskReassignmentsTable = 'generated_task_reassignments';
+const _employeeQuestionsTable = 'employee_questions';
 
 class AppException implements Exception {
   const AppException(this.message);
@@ -36,6 +38,8 @@ class SupabaseService {
   _generatedTaskLogsByRangeCache = {};
   final Map<String, _TimedValue<List<GeneratedTaskReassignment>>>
   _generatedTaskReassignmentsByWeekCache = {};
+  final Map<String, _TimedValue<List<EmployeeQuestionMessage>>>
+  _questionMessagesByEmployeeCache = {};
 
   _TimedValue<List<Profile>>? _allUsersCache;
   _TimedValue<List<Profile>>? _employeesOnlyCache;
@@ -109,6 +113,7 @@ class SupabaseService {
       _generatedTaskLogsByDateCache.clear();
       _generatedTaskLogsByRangeCache.clear();
       _generatedTaskReassignmentsByWeekCache.clear();
+      _questionMessagesByEmployeeCache.clear();
     } else if (employeeId != null) {
       _generatedTaskLogsByDateCache.removeWhere(
         (key, _) => key.startsWith('$employeeId|'),
@@ -119,6 +124,7 @@ class SupabaseService {
       _generatedTaskReassignmentsByWeekCache.removeWhere(
         (key, _) => key.startsWith('$employeeId|'),
       );
+      _questionMessagesByEmployeeCache.remove(employeeId);
     }
   }
 
@@ -135,6 +141,7 @@ class SupabaseService {
     _generatedTaskLogsByDateCache.clear();
     _generatedTaskLogsByRangeCache.clear();
     _generatedTaskReassignmentsByWeekCache.clear();
+    _questionMessagesByEmployeeCache.clear();
   }
 
   Future<Profile?> fetchCurrentProfile() async {
@@ -548,6 +555,13 @@ class SupabaseService {
         if (question.inputType == QuestionInputType.check &&
             question.requiresYesDetails) {
           dropdownOptions.add('${_checkYesDetailsPrefix}1');
+          if (question.defaultPriority != null &&
+              question.defaultPriority! >= 1 &&
+              question.defaultPriority! <= 5) {
+            dropdownOptions.add(
+              '$_defaultPriorityPrefix${question.defaultPriority}',
+            );
+          }
         }
         if (question.inputType == QuestionInputType.check) {
           dropdownOptions.addAll(const ['Yes', 'No']);
@@ -1299,6 +1313,125 @@ class SupabaseService {
     await ignoreFlaggedTaskAlert(alertKey: alertKey);
   }
 
+  Future<List<EmployeeQuestionMessage>> fetchQuestionMessagesForEmployee({
+    required String employeeId,
+    bool forceRefresh = false,
+  }) async {
+    final normalizedEmployeeId = employeeId.trim();
+    if (normalizedEmployeeId.isEmpty) {
+      return const <EmployeeQuestionMessage>[];
+    }
+
+    final cached = _questionMessagesByEmployeeCache[normalizedEmployeeId];
+    if (!forceRefresh && cached != null && _isFresh(cached.savedAt)) {
+      return cached.value;
+    }
+
+    try {
+      final rows = await _client
+          .from(_employeeQuestionsTable)
+          .select()
+          .eq('employee_id', normalizedEmployeeId)
+          .order('created_at', ascending: true);
+
+      final result = (rows as List)
+          .cast<Map<String, dynamic>>()
+          .map(EmployeeQuestionMessage.fromMap)
+          .toList();
+      _questionMessagesByEmployeeCache[normalizedEmployeeId] = _TimedValue(
+        result,
+      );
+      return result;
+    } on PostgrestException catch (error) {
+      if (_isEmployeeQuestionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for employee_questions before using questions chat.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
+  Future<List<EmployeeQuestionMessage>> fetchCurrentEmployeeQuestionMessages({
+    bool forceRefresh = false,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+    return fetchQuestionMessagesForEmployee(
+      employeeId: user.id,
+      forceRefresh: forceRefresh,
+    );
+  }
+
+  Future<void> sendAdminQuestionMessage({
+    required String employeeId,
+    required String messageText,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+    final trimmedText = messageText.trim();
+    final normalizedEmployeeId = employeeId.trim();
+    if (normalizedEmployeeId.isEmpty || trimmedText.isEmpty) {
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'employee_id': normalizedEmployeeId,
+      'admin_id': user.id,
+      'sender_id': user.id,
+      'sender_role': QuestionMessageSenderRole.admin.value,
+      'message_text': trimmedText,
+    };
+
+    try {
+      await _client.from(_employeeQuestionsTable).insert(payload);
+      _questionMessagesByEmployeeCache.remove(normalizedEmployeeId);
+    } on PostgrestException catch (error) {
+      if (_isEmployeeQuestionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for employee_questions before using questions chat.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
+  Future<void> sendEmployeeQuestionResponse({
+    required String messageText,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw const AppException('You must be signed in.');
+    }
+    final trimmedText = messageText.trim();
+    if (trimmedText.isEmpty) {
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'employee_id': user.id,
+      'sender_id': user.id,
+      'sender_role': QuestionMessageSenderRole.employee.value,
+      'message_text': trimmedText,
+    };
+
+    try {
+      await _client.from(_employeeQuestionsTable).insert(payload);
+      _questionMessagesByEmployeeCache.remove(user.id);
+    } on PostgrestException catch (error) {
+      if (_isEmployeeQuestionsTableMissing(error.message)) {
+        throw const AppException(
+          'Database update required: run the SQL for employee_questions before using questions chat.',
+        );
+      }
+      throw AppException(error.message);
+    }
+  }
+
   bool _matchesUnwantedAnswer(String answerText, String unwantedAnswer) {
     return answerText.trim().toLowerCase() ==
         unwantedAnswer.trim().toLowerCase();
@@ -1348,6 +1481,14 @@ class SupabaseService {
   bool _isGeneratedTaskReassignmentsTableMissing(String message) {
     final lower = message.toLowerCase();
     return lower.contains('generated_task_reassignments') &&
+        (lower.contains('does not exist') ||
+            lower.contains('schema cache') ||
+            lower.contains('relation'));
+  }
+
+  bool _isEmployeeQuestionsTableMissing(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains(_employeeQuestionsTable) &&
         (lower.contains('does not exist') ||
             lower.contains('schema cache') ||
             lower.contains('relation'));

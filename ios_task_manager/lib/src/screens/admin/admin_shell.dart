@@ -26,6 +26,7 @@ class _AdminShellState extends State<AdminShell> {
   int _index = 0;
   int _alertCount = 0;
   late final List<Widget> _pages;
+  static const _titles = ['Dashboard', 'Add', 'Users', 'Profile'];
 
   @override
   void initState() {
@@ -62,11 +63,8 @@ class _AdminShellState extends State<AdminShell> {
 
   @override
   Widget build(BuildContext context) {
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-    final topInset = viewPadding.top;
-    const topBarHeight = 16.0;
-    const bellHitBox = 34.0;
-    const navHeight = 70.0;
+    const bellHitBox = 38.0;
+    const navHeight = 72.0;
     final barColor =
         Theme.of(context).navigationBarTheme.backgroundColor ??
         Theme.of(context).colorScheme.surface;
@@ -75,37 +73,45 @@ class _AdminShellState extends State<AdminShell> {
     return Scaffold(
       body: Column(
         children: [
-          Container(
-            height: topInset + topBarHeight,
-            decoration: BoxDecoration(
-              color: barColor,
-              border: Border(bottom: BorderSide(color: borderColor)),
-            ),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Transform.translate(
-                offset: const Offset(-32, 16),
-                child: IconButton(
-                  onPressed: _openAlerts,
-                  tooltip: 'Alerts',
-                  visualDensity: VisualDensity.compact,
-                  style: IconButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(bellHitBox, bellHitBox),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  icon: Badge(
-                    isLabelVisible: _alertCount > 0,
-                    label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
-                    child: const Icon(
-                      Icons.notifications_rounded,
-                      color: Colors.black,
+          SafeArea(
+            bottom: false,
+            child: Container(
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: barColor,
+                border: Border(bottom: BorderSide(color: borderColor)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _titles[_index],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
-                ),
+                  IconButton(
+                    onPressed: _openAlerts,
+                    tooltip: 'Alerts',
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(bellHitBox, bellHitBox),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Badge(
+                      isLabelVisible: _alertCount > 0,
+                      label: Text(_alertCount > 99 ? '99+' : '$_alertCount'),
+                      child: const Icon(Icons.notifications_rounded),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
+          const SizedBox(height: 2),
           Expanded(
             child: MediaQuery.removePadding(
               context: context,
@@ -127,7 +133,7 @@ class _AdminShellState extends State<AdminShell> {
             height: navHeight,
             child: Center(
               child: FractionallySizedBox(
-                widthFactor: 0.9,
+                widthFactor: 0.92,
                 child: NavigationBar(
                   backgroundColor: barColor,
                   height: navHeight,
@@ -143,9 +149,9 @@ class _AdminShellState extends State<AdminShell> {
                       label: 'Dashboard',
                     ),
                     const NavigationDestination(
-                      icon: Icon(Icons.checklist_outlined),
-                      selectedIcon: Icon(Icons.checklist),
-                      label: 'Tasks',
+                      icon: Icon(Icons.add_circle_outline),
+                      selectedIcon: Icon(Icons.add_circle),
+                      label: 'Add',
                     ),
                     const NavigationDestination(
                       icon: Icon(Icons.people_outline),

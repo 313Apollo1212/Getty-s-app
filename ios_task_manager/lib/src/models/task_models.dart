@@ -36,6 +36,7 @@ const _assignmentTypePrefix = '__meta:assignment_type:';
 const _typePrefix = '__type:';
 const _unwantedAnswerPrefix = '__meta:unwanted:';
 const _checkYesDetailsPrefix = '__meta:check_yes_details:';
+const _defaultPriorityPrefix = '__meta:default_priority:';
 
 enum AssignmentKind {
   assessment,
@@ -511,6 +512,7 @@ class AssignmentQuestion {
     required this.dropdownOptions,
     required this.unwantedAnswer,
     required this.requiresYesDetails,
+    required this.defaultPriority,
   });
 
   final String id;
@@ -521,6 +523,7 @@ class AssignmentQuestion {
   final List<String> dropdownOptions;
   final String? unwantedAnswer;
   final bool requiresYesDetails;
+  final int? defaultPriority;
 
   factory AssignmentQuestion.fromMap(Map<String, dynamic> map) {
     final optionsRaw = map['dropdown_options'];
@@ -534,6 +537,7 @@ class AssignmentQuestion {
     String? storedType;
     String? unwantedAnswer;
     var requiresYesDetails = false;
+    int? defaultPriority;
     final cleanedOptions = <String>[];
 
     for (final option in options) {
@@ -555,6 +559,14 @@ class AssignmentQuestion {
       if (option.startsWith(_checkYesDetailsPrefix)) {
         final value = option.replaceFirst(_checkYesDetailsPrefix, '').trim();
         requiresYesDetails = value != '0';
+        continue;
+      }
+      if (option.startsWith(_defaultPriorityPrefix)) {
+        final value = option.replaceFirst(_defaultPriorityPrefix, '').trim();
+        final parsed = int.tryParse(value);
+        if (parsed != null && parsed >= 1 && parsed <= 5) {
+          defaultPriority = parsed;
+        }
         continue;
       }
       cleanedOptions.add(option);
@@ -590,6 +602,7 @@ class AssignmentQuestion {
       dropdownOptions: cleanedOptions,
       unwantedAnswer: unwantedAnswer,
       requiresYesDetails: requiresYesDetails,
+      defaultPriority: defaultPriority,
     );
   }
 }
@@ -627,6 +640,7 @@ class TaskDraftQuestion {
     required this.dropdownOptions,
     this.unwantedAnswer,
     this.requiresYesDetails = false,
+    this.defaultPriority,
   });
 
   final String prompt;
@@ -634,6 +648,7 @@ class TaskDraftQuestion {
   final List<String> dropdownOptions;
   final String? unwantedAnswer;
   final bool requiresYesDetails;
+  final int? defaultPriority;
 }
 
 class TaskAssignmentDraft {
@@ -684,4 +699,52 @@ class DashboardAnswerEntry {
   final TaskAssignment assignment;
   final AssignmentQuestion question;
   final QuestionAnswer answer;
+}
+
+enum QuestionMessageSenderRole {
+  admin,
+  employee;
+
+  static QuestionMessageSenderRole fromString(String value) {
+    return switch (value.trim().toLowerCase()) {
+      'admin' => QuestionMessageSenderRole.admin,
+      _ => QuestionMessageSenderRole.employee,
+    };
+  }
+
+  String get value => name;
+}
+
+class EmployeeQuestionMessage {
+  const EmployeeQuestionMessage({
+    required this.id,
+    required this.employeeId,
+    required this.senderId,
+    required this.senderRole,
+    required this.messageText,
+    required this.createdAt,
+    this.adminId,
+  });
+
+  final String id;
+  final String employeeId;
+  final String senderId;
+  final QuestionMessageSenderRole senderRole;
+  final String messageText;
+  final DateTime createdAt;
+  final String? adminId;
+
+  factory EmployeeQuestionMessage.fromMap(Map<String, dynamic> map) {
+    return EmployeeQuestionMessage(
+      id: map['id'] as String,
+      employeeId: map['employee_id'] as String,
+      senderId: map['sender_id'] as String,
+      senderRole: QuestionMessageSenderRole.fromString(
+        map['sender_role'] as String? ?? 'employee',
+      ),
+      messageText: map['message_text'] as String? ?? '',
+      createdAt: DateTime.parse(map['created_at'] as String),
+      adminId: map['admin_id'] as String?,
+    );
+  }
 }

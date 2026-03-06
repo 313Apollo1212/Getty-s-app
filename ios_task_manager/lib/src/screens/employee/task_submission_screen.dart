@@ -379,7 +379,15 @@ class _QuestionInputCardState extends State<_QuestionInputCard> {
             parsed.estimatedMinutes!,
           ).toDouble();
         }
-        if (parsed.priority != null && parsed.priority! >= 1 && parsed.priority! <= 5) {
+        final configuredDefault = widget.question.defaultPriority;
+        if (configuredDefault != null &&
+            configuredDefault >= 1 &&
+            configuredDefault <= 5) {
+          _priority = configuredDefault;
+        }
+        if (parsed.priority != null &&
+            parsed.priority! >= 1 &&
+            parsed.priority! <= 5) {
           _priority = parsed.priority!;
         }
       }

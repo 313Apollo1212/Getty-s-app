@@ -13,6 +13,19 @@ enum _QuestionSort { mostUnusual, mostChanged }
 
 enum _AlertReasonType { unwantedAnswer, numericThreshold, suddenShift }
 
+enum _AssignmentDateFilter { today, sevenDays, thirtyDays, year }
+
+extension on _AssignmentDateFilter {
+  String get label {
+    return switch (this) {
+      _AssignmentDateFilter.today => 'Today',
+      _AssignmentDateFilter.sevenDays => '7 Days',
+      _AssignmentDateFilter.thirtyDays => '30 Days',
+      _AssignmentDateFilter.year => 'Year',
+    };
+  }
+}
+
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key, required this.service});
 
@@ -27,6 +40,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   _QuestionSort _questionSort = _QuestionSort.mostUnusual;
   String? _selectedEmployeeId;
+  _AssignmentDateFilter _assignmentDateFilter = _AssignmentDateFilter.today;
+  final Set<String> _expandedEmployees = <String>{};
 
   @override
   void initState() {
@@ -774,6 +789,223 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     };
   }
 
+  bool _matchesAssignmentDateFilter(TaskAssignment assignment) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expected = assignment.expectedAt.toLocal();
+
+    switch (_assignmentDateFilter) {
+      case _AssignmentDateFilter.today:
+        return _isSameDay(expected, today);
+      case _AssignmentDateFilter.sevenDays:
+        final endExclusive = today.add(const Duration(days: 7));
+        return !expected.isBefore(today) && expected.isBefore(endExclusive);
+      case _AssignmentDateFilter.thirtyDays:
+        final endExclusive = today.add(const Duration(days: 30));
+        return !expected.isBefore(today) && expected.isBefore(endExclusive);
+      case _AssignmentDateFilter.year:
+        return expected.year == today.year;
+    }
+  }
+
+  List<TaskAssignment> _filteredAssignments(List<TaskAssignment> source) {
+    final filtered = source.where(_matchesAssignmentDateFilter).where((task) {
+      if (_selectedEmployeeId == null) {
+        return true;
+      }
+      return task.employeeId == _selectedEmployeeId;
+    }).toList();
+
+    filtered.sort((a, b) => a.expectedAt.compareTo(b.expectedAt));
+    return filtered;
+  }
+
+  Widget _buildAssignmentManagementPanel(List<TaskAssignment> assignments) {
+    final taskCount = assignments
+        .where((assignment) => assignment.kind == AssignmentKind.task)
+        .length;
+    final assessmentCount = assignments
+        .where((assignment) => assignment.kind == AssignmentKind.assessment)
+        .length;
+
+    final grouped = <String, List<TaskAssignment>>{};
+    for (final assignment in assignments) {
+      grouped
+          .putIfAbsent(assignment.employeeId, () => <TaskAssignment>[])
+          .add(assignment);
+    }
+    final groupedEntries = grouped.entries.toList()
+      ..sort(
+        (a, b) => a.value.first.employeeName.toLowerCase().compareTo(
+          b.value.first.employeeName.toLowerCase(),
+        ),
+      );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Employee Tasks / Assessments',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in _AssignmentDateFilter.values)
+                  ChoiceChip(
+                    label: Text(option.label),
+                    selected: _assignmentDateFilter == option,
+                    onSelected: (_) {
+                      setState(() {
+                        _assignmentDateFilter = option;
+                        _expandedEmployees.clear();
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 460;
+                if (compact) {
+                  return Column(
+                    children: [
+                      _DashboardTaskSummaryTile(
+                        icon: Icons.checklist_rtl_rounded,
+                        label: 'Total Tasks',
+                        value: '$taskCount',
+                      ),
+                      const SizedBox(height: 8),
+                      _DashboardTaskSummaryTile(
+                        icon: Icons.assignment_outlined,
+                        label: 'Assessments',
+                        value: '$assessmentCount',
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(
+                      child: _DashboardTaskSummaryTile(
+                        icon: Icons.checklist_rtl_rounded,
+                        label: 'Total Tasks',
+                        value: '$taskCount',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _DashboardTaskSummaryTile(
+                        icon: Icons.assignment_outlined,
+                        label: 'Assessments',
+                        value: '$assessmentCount',
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            if (groupedEntries.isEmpty)
+              Text('No items for ${_assignmentDateFilter.label.toLowerCase()}.')
+            else
+              for (final entry in groupedEntries) ...[
+                Builder(
+                  builder: (context) {
+                    final employeeItems = entry.value;
+                    final sample = employeeItems.first;
+                    return ExpansionTile(
+                      key: PageStorageKey(
+                        'dashboard-employee-${sample.employeeId}',
+                      ),
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(bottom: 8),
+                      initiallyExpanded: _expandedEmployees.contains(
+                        sample.employeeId,
+                      ),
+                      onExpansionChanged: (expanded) {
+                        setState(() {
+                          if (expanded) {
+                            _expandedEmployees.add(sample.employeeId);
+                          } else {
+                            _expandedEmployees.remove(sample.employeeId);
+                          }
+                        });
+                      },
+                      title: Text(
+                        sample.employeeName,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${employeeItems.length} item${employeeItems.length == 1 ? '' : 's'}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      children: [
+                        for (var i = 0; i < employeeItems.length; i++) ...[
+                          _buildDashboardAssignmentItem(employeeItems[i]),
+                          if (i != employeeItems.length - 1)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 2),
+                              child: Divider(height: 10),
+                            ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+                if (entry != groupedEntries.last) const Divider(height: 10),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDashboardAssignmentItem(TaskAssignment assignment) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F8EA),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFD6E2C9)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            assignment.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${assignment.kind.label} • ${assignment.status.label}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Expected ${formatDateTime(assignment.expectedAt)}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppBackground(
@@ -853,6 +1085,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ? _selectedEmployeeId
                 : null;
 
+            final filteredAssignments = _filteredAssignments(
+              payload.assignments,
+            );
             final answers = _filterAnswers(payload.answers);
             final unusual = _buildUnusualAnswers(answers);
             final snapshotStats = _buildAnswerSnapshot(
@@ -956,6 +1191,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                _buildAssignmentManagementPanel(filteredAssignments),
                 const SizedBox(height: 10),
                 Text(
                   'Answer Snapshot (top)',
@@ -1290,6 +1527,53 @@ class _SnapshotTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardTaskSummaryTile extends StatelessWidget {
+  const _DashboardTaskSummaryTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F8EA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD6E2C9)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF2A3D1D)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
         ),
       ),
     );
